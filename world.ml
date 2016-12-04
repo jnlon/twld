@@ -34,20 +34,27 @@ type tile_color = NoColor | Color of int ;;
 type tile_liquid = NoLiquid | Water | Honey | Lava ;;
 type tile_wall  = NoWall | Wall of (wall_type * tile_color) ;;
 type tile_frame = NoFrame | Frame of (x * y) ;; 
-type tile_wire = NoWire | GreenWire | YellowWire | RedWire | BlueWire
+type tile_wire = NoWire | Wire1 | Wire2 | Wire3 | Wire4
 type tile_form = Slope of int | HalfBrick ;;
+
+type tile_background = 
+  { wire : tile_wire ;
+    wall : tile_wall ;
+    actuator : bool ;
+    inactive : bool } ;;
 
 type tile_solid =
   { tile_type : int ;
     color : tile_color ;
     frame : tile_frame ;
-    wire : tile_wire ;
     form : tile_form ;
-    actuator : bool ;
-    inactive : bool } ;;
+    background: tile_background } ;;
 
-type tile_data = Solid of tile_solid | Liquid of tile_liquid ;;
-type tile = Inactive | Active of tile_data ;;
+type tile = 
+    Solid of tile_solid 
+  | Liquid of tile_liquid 
+  | Empty of tile_background ;;
+
 type tiles = tile array array ;;
 
 type position = 
@@ -318,37 +325,37 @@ type tile_flags =
 let read_tile_flags in_ch = 
   let (|.|) data bit = data land bit == bit 
   in
-  let get_if_bit data n itm = 
+  let if_bit data n itm = 
     if (data |.| n) then itm else TF_None
   in
   let read_tile_flags_3 () =
     let b = input_byte in_ch in
     List.filter (fun x -> x = TF_None)
-    [ get_if_bit b 1 TF_HasB2;
-      get_if_bit b 2 TF_TileActive;
-      get_if_bit b 4 TF_HasWall;
-      get_if_bit b 16 TF_Lava;
-      get_if_bit b 32 TF_Int16Tile;
-      get_if_bit b 64 TF_Int8RLE;
-      get_if_bit b 128 TF_Int16RLE; ]
+    [ if_bit b 1 TF_HasB2;
+      if_bit b 2 TF_TileActive;
+      if_bit b 4 TF_HasWall;
+      if_bit b 16 TF_Lava;
+      if_bit b 32 TF_Int16Tile;
+      if_bit b 64 TF_Int8RLE;
+      if_bit b 128 TF_Int16RLE; ]
   in
   let read_tile_flags_2 () =
     let b = input_byte in_ch in
     List.filter (fun x -> x = TF_None)
-    [ get_if_bit b 1 TF_HasB1;
-      get_if_bit b 2 TF_Wire;
-      get_if_bit b 4 TF_Wire2;
-      get_if_bit b 8 TF_Wire3;
+    [ if_bit b 1 TF_HasB1;
+      if_bit b 2 TF_Wire;
+      if_bit b 4 TF_Wire2;
+      if_bit b 8 TF_Wire3;
       TF_Slope (b lsr 4); ]
   in
   let read_tile_flags_1 () =
     let b = input_byte in_ch in
     List.filter (fun x -> x = TF_None)
-    [ get_if_bit b 2 TF_Actuator;
-      get_if_bit b 4 TF_Inactive;
-      get_if_bit b 8 TF_HasTileColor;
-      get_if_bit b 16 TF_WallHasColor;
-      get_if_bit b 32 TF_Wire4; ]
+    [ if_bit b 2 TF_Actuator;
+      if_bit b 4 TF_Inactive;
+      if_bit b 8 TF_HasTileColor;
+      if_bit b 16 TF_WallHasColor;
+      if_bit b 32 TF_Wire4; ]
   in
   let flags3 = read_tile_flags_3 () 
   in
@@ -364,6 +371,36 @@ let read_tile_flags in_ch =
 ;;
 
 let read_tiles in_ch header = 
+  Log.infoln "loading tiles...";
+  let max_x = Util.int_of_bytes (List.assoc "max_tiles_x" header) in
+  let max_y = Util.int_of_bytes (List.assoc "max_tiles_y" header) in
+  let importance = Util.bool_array_of_bits (List.assoc "importance" header) in
+
+  let input_int16 in_ch = 
+    let b1 = input_byte in_ch in
+    let b2 = input_byte in_ch in
+    b1 lor (b2 lsl 8)
+  in
+
+  let read_tile () =
+    let flags = read_tile_flags in_ch in
+    let tile_is flag = List.mem flag flags in
+      if tile_is TF_TileActive then
+        let tile_type = 
+          if tile_is TF_Int16Tile 
+          then input_int16 in_ch
+          else input_byte in_ch
+        in
+      else 
+        ()
+
+
+
+
+
+  () ;;
+
+(*let read_tiles in_ch header = 
   Log.infoln "loading tiles...";
   let max_x = Util.int_of_bytes (List.assoc "max_tiles_x" header) in
   let max_y = Util.int_of_bytes (List.assoc "max_tiles_y" header) in
@@ -466,6 +503,7 @@ let read_tiles in_ch header =
   done;
   log.infof " %d tiles\n" (max_y*max_x);
   tiles ;;
+*)
 
 let read_chests in_ch = () ;;
 let read_signs in_ch = () ;;
