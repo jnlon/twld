@@ -288,6 +288,81 @@ let rec string_of_header_data d =
 let print_header_pair p =
   Printf.printf "%s: %s\n" (fst p) (string_of_header_data (snd p)) ;;
 
+
+(**)
+type tile_flags = 
+  (* B3 *)
+  | TF_HasB2      (* 1 *)
+  | TF_TileActive (* 2 *)
+  | TF_HasWall    (* 4 *)
+  | TF_Lava       (* 16 *)
+  | TF_Int16Tile  (* 32 *)
+  | TF_Int8RLE    (* 64 *)
+  | TF_Int16RLE   (* 128 *)
+  (* B2 *)
+  | TF_HasB1      (* 1 *)
+  | TF_Wire       (* 2 *)
+  | TF_Wire2      (* 4 *)
+  | TF_Wire3      (* 8 *)
+  | TF_Slope of int (* 16-128 *)
+  (* B1 *)
+  | TF_Actuator     (* 2 *)
+  | TF_Inactive     (* 4 *)
+  | TF_HasTileColor (* 8 *)
+  | TF_WallHasColor (* 16 *)
+  | TF_Wire4        (* 32 *)
+  (* Misc *)
+  | TF_None
+
+(* Returns a list of tokens that tell us what to read *)
+let read_tile_flags in_ch = 
+  let (|.|) data bit = data land bit == bit 
+  in
+  let get_if_bit data n itm = 
+    if (data |.| n) then itm else TF_None
+  in
+  let read_tile_flags_3 () =
+    let b = input_byte in_ch in
+    List.filter (fun x -> x = TF_None)
+    [ get_if_bit b 1 TF_HasB2;
+      get_if_bit b 2 TF_TileActive;
+      get_if_bit b 4 TF_HasWall;
+      get_if_bit b 16 TF_Lava;
+      get_if_bit b 32 TF_Int16Tile;
+      get_if_bit b 64 TF_Int8RLE;
+      get_if_bit b 128 TF_Int16RLE; ]
+  in
+  let read_tile_flags_2 () =
+    let b = input_byte in_ch in
+    List.filter (fun x -> x = TF_None)
+    [ get_if_bit b 1 TF_HasB1;
+      get_if_bit b 2 TF_Wire;
+      get_if_bit b 4 TF_Wire2;
+      get_if_bit b 8 TF_Wire3;
+      TF_Slope (b lsr 4); ]
+  in
+  let read_tile_flags_1 () =
+    let b = input_byte in_ch in
+    List.filter (fun x -> x = TF_None)
+    [ get_if_bit b 2 TF_Actuator;
+      get_if_bit b 4 TF_Inactive;
+      get_if_bit b 8 TF_HasTileColor;
+      get_if_bit b 16 TF_WallHasColor;
+      get_if_bit b 32 TF_Wire4; ]
+  in
+  let flags3 = read_tile_flags_3 () 
+  in
+  let flags2 = if (List.mem TF_HasB2 flags3) 
+               then read_tile_flags_2 ()
+               else []
+  in
+  let flags1 = if (List.mem TF_HasB1 flags2) 
+               then read_tile_flags_1 ()
+               else []
+  in
+  flags3 @ flags2 @ flags1
+;;
+
 let read_tiles in_ch header = 
   Log.infoln "loading tiles...";
   let max_x = Util.int_of_bytes (List.assoc "max_tiles_x" header) in
@@ -297,14 +372,19 @@ let read_tiles in_ch header =
   let read_wld_tile () =
     let tilebuf = Buffer.create 0 in
     let bit_on bts n = ((int_of_char (Bytes.get bts 0)) land n) = n in
-    let add_n_bytes n = let b = (single_read inch n) in Buffer.add_bytes tilebuf b ; b in
+    (*let add_n_bytes n = let b = (single_read inch n) in Buffer.add_bytes tilebuf b ; b in*)
+    let add_n_bytes n = 
+      for i=0 to n do
+        Buffer.add_char tilebuf @@ input_char in_ch
+      done
+    in
     let add_byte () = add_n_bytes 1 in
     let add_int16 () = add_n_bytes 2 in
     let add_int32 () = add_n_bytes 4 in
 
     let b3 = add_byte () in
-    let b2 = if (bit_on b3 1) then add_byte () else bytes.make 1 '\000' in
-    let b = if (bit_on b2 1) then add_byte () else bytes.make 1 '\000' in
+    let b2 = if (bit_on b3 1) then add_byte () else Bytes.make 1 '\000' in
+    let b = if (bit_on b2 1) then add_byte () else Bytes.make 1 '\000' in
 
     let tile_id = begin
       if (bit_on b3 2) then begin (* if active tile *)
