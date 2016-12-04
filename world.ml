@@ -35,7 +35,7 @@ type tile_liquid = NoLiquid | Water | Honey | Lava ;;
 type tile_wall  = NoWall | Wall of (wall_type * tile_color) ;;
 type tile_frame = NoFrame | Frame of (x * y) ;; 
 type tile_wire = NoWire | Wire1 | Wire2 | Wire3 | Wire4
-type tile_form = Slope of int | HalfBrick ;;
+type tile_form = Slope of int | NoSlope | HalfBrick ;;
 
 type tile_background = 
   { wire : tile_wire ;
@@ -302,7 +302,7 @@ type tile_flags =
   | TF_HasB2      (* 1 *)
   | TF_TileActive (* 2 *)
   | TF_HasWall    (* 4 *)
-  | TF_Lava       (* 16 *)
+  | TF_Liquid     (* 8 *)
   | TF_Int16Tile  (* 32 *)
   | TF_Int8RLE    (* 64 *)
   | TF_Int16RLE   (* 128 *)
@@ -334,7 +334,7 @@ let read_tile_flags in_ch =
     [ if_bit b 1 TF_HasB2;
       if_bit b 2 TF_TileActive;
       if_bit b 4 TF_HasWall;
-      if_bit b 16 TF_Lava;
+      if_bit b 8 TF_Liquid;
       if_bit b 32 TF_Int16Tile;
       if_bit b 64 TF_Int8RLE;
       if_bit b 128 TF_Int16RLE; ]
@@ -385,18 +385,93 @@ let read_tiles in_ch header =
   let read_tile () =
     let flags = read_tile_flags in_ch in
     let tile_is flag = List.mem flag flags in
-      if tile_is TF_TileActive then
-        let tile_type = 
-          if tile_is TF_Int16Tile 
-          then input_int16 in_ch
-          else input_byte in_ch
-        in
+
+    let read_color_if condition = 
+      if tile_is condition
+        then Color (input_byte in_ch)
+        else NoColor
+    in
+
+    let tile_type =
+      if not (tile_is TF_TileActive) then
+        if tile_is TF_Int16Tile 
+        then input_int16 in_ch
+        else input_byte in_ch
+      else 0
+    in
+
+    let frame = 
+      if importance.(tile_type) 
+      then begin 
+        let x = input_int16 in_ch in
+        let y = input_int16 in_ch in
+        Frame (x,y)
+      end
+      else NoFrame
+
+      in
+
+    let tile_color = 
+      if tile_is TF_TileActive 
+      then read_color_if TF_HasTileColor 
+      else NoColor
+    in
+
+    let wall =
+      if tile_is TF_HasWall then 
+        Wall ((input_byte in_ch),
+              (read_color_if TF_WallHasColor))
+      else NoWall
+    in
+
+    let liquid = 
+      if tile_is TF_Liquid then
+        match (input_byte in_ch) with 
+          | 0 -> Water
+          | 1 -> Lava
+          | 2 -> Honey
+          | _ -> NoLiquid
       else 
-        ()
+        NoLiquid
+    in
 
+    let wire = 
+      if tile_is TF_Wire then Wire1
+      else if tile_is TF_Wire2 then Wire2
+      else if tile_is TF_Wire3 then Wire3
+      else if tile_is TF_Wire4 then Wire4
+      else NoWire
+    in
 
+    let form = 
+      let d = 
+        List.find 
+          (function 
+            | TF_Slope n -> true 
+            | _ -> false)
+          flags
+      in
+      let slope = 
+        match d with
+          | TF_Slope n -> n
+          | _ -> 0
+      in
+      if slope = 0  (*Note: check if tile type is solid!*)
+        then NoSlope
+        else if slope == 1 then HalfBrick
+        else Slope (slope - 1)
+    in
 
+    let actuator = tile_is TF_Actuator in
+    let inactive = tile_is TF_Inactive in
 
+    let rle_k = 
+      if tile_is TF_Int16RLE then input_int16 in_ch
+      else if tile_is TF_Int8RLE then input_byte in_ch
+      else 0
+    in
+    ()
+  in
 
   () ;;
 
