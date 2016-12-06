@@ -30,30 +30,35 @@ type header = header_pair list ;;
 type x = int ;;
 type y = int ;;
 type wall_type = int ;;
-type tile_color = NoColor | Color of int ;;
-type tile_liquid = NoLiquid | Water | Honey | Lava ;;
-type tile_wall  = NoWall | Wall of (wall_type * tile_color) ;;
+type tile_solid = int ;;
+type tile_liquid = int ;;
+type tile_type = NoType | Solid of tile_solid | Liquid of tile_liquid ;;
+type tile_wall = NoWall | Wall of wall_type ;;
 type tile_frame = NoFrame | Frame of (x * y) ;; 
 type tile_wire = NoWire | Wire1 | Wire2 | Wire3 | Wire4
-type tile_form = Slope of int | NoSlope | HalfBrick ;;
+type tile_slope = Flat | HalfBrick | Slope of int ;;
+type tile_color = NoColor | Color of int ;;
 
 type tile_background = 
   { wire : tile_wire ;
     wall : tile_wall ;
+    color : tile_color ;
     actuator : bool ;
     inactive : bool } ;;
 
-type tile_solid =
-  { tile_type : int ;
+type tile_foreground =
+  { t : tile_type ;
     color : tile_color ;
     frame : tile_frame ;
-    form : tile_form ;
-    background: tile_background } ;;
+    slope : tile_slope } ;;
+
+type tile_data = 
+  { front : tile_foreground ;
+    back : tile_background }
 
 type tile = 
-    Solid of tile_solid 
-  | Liquid of tile_liquid 
-  | Empty of tile_background ;;
+    Tile of tile_data
+  | EmptyTile ;;
 
 type tiles = tile array array ;;
 
@@ -275,6 +280,7 @@ let read_header_from_pair in_chan (previously_read : header) pair : header =
   Log.printf Log.Debug "Reading '%s'\n" (fst pair);
   ((data_of_pair pair) :: previously_read) ;;
 
+
 let read_header inch : header = 
   List.fold_left 
     (read_header_from_pair inch)
@@ -295,40 +301,6 @@ let rec string_of_header_data d =
 let print_header_pair p =
   Printf.printf "%s: %s\n" (fst p) (string_of_header_data (snd p)) ;;
 
-
-(* Better approach: we have a type for the flags, then use small functions to
- * ask what is happening *)
-
-type tile_flags = 
-  { b3 : int ;
-    b2 : int ;
-    b1 : int } ;;
-
-(*
-type tile_flags = 
-  (* B3 *)
-  | TF_HasB2      (* 1 *)
-  | TF_TileActive (* 2 *)
-  | TF_HasWall    (* 4 *)
-  | TF_Liquid     (* 8 *)
-  | TF_Int16Tile  (* 32 *)
-  | TF_Int8RLE    (* 64 *)
-  | TF_Int16RLE   (* 128 *)
-  (* B2 *)
-  | TF_HasB1      (* 1 *)
-  | TF_Wire       (* 2 *)
-  | TF_Wire2      (* 4 *)
-  | TF_Wire3      (* 8 *)
-  | TF_Slope of int (* 16-128 *)
-  (* B1 *)
-  | TF_Actuator     (* 2 *)
-  | TF_Inactive     (* 4 *)
-  | TF_HasTileColor (* 8 *)
-  | TF_WallHasColor (* 16 *)
-  | TF_Wire4        (* 32 *)
-  (* Misc *)
-  | TF_None
-*)
 
 let byte_to_boolbits (byte : int) =
   let (|.|) data bit = data land bit == bit in
@@ -352,9 +324,9 @@ let int_of_boolbits arr =
   sum @@ Array.mapi (fun i x -> if x then (2 ^^ i) else 0) arr ;;
 
 let read_tile_flags in_ch = 
-  let flags3 = byte_to_bool_arr @@ input_byte in_ch in
-  let flags2 = byte_to_bool_arr @@ if (flags3.(0)) then input_byte in_ch else 0 in
-  let flags1 = byte_to_bool_arr @@ if (flags2.(0)) then input_byte in_ch else 0 in
+  let flags3 = byte_to_boolbits @@ input_byte in_ch in
+  let flags2 = byte_to_boolbits @@ if (flags3.(0)) then input_byte in_ch else 0 in
+  let flags1 = byte_to_boolbits @@ if (flags2.(0)) then input_byte in_ch else 0 in
   (flags3,flags2,flags1) ;;
 
 let read_tiles in_ch header = 
@@ -371,104 +343,91 @@ let read_tiles in_ch header =
 
   (* A beautiful abstraction over this cluster f*** of a format *)
   let read_tile () =
-    (* These flags tell us how many bytes we need to read to extract all the
-     * information from this tile *)
+    (* These flags indicate how much we need to read to extract all the
+     * information from the series of bytes representing this tile *)
     let flags3,flags2,flags1 = read_tile_flags in_ch in
     (* First byte: b3 (everything past this is optional) *)
-    let has_tile_active = flags.(1) in
+    let has_tile_active = flags3.(1) in
     let has_wall = flags3.(2) in
-    let has_liquid = flags3.(3) || flags.(4) in 
-    let has_int16_tile = flags3.(6)
-    let has_int8_rle = flags3.(6)
-    let has_int16_rle = flags3.(7)
+    let has_liquid = flags3.(3) || flags3.(4) in 
+    let has_int16_tile_type = flags3.(6) in
+    let has_int8_rle = flags3.(6) in
+    let has_int16_rle = flags3.(7) in
     (* Second byte: b2 *)
     let has_wire1 = flags2.(1) in
     let has_wire2 = flags2.(2) in
     let has_wire3 = flags2.(3) in
-    let slope = int_of_boolbits [|flags2.(4); flags.(5); flags.(6); flags.(7)|]
+    let slope = int_of_boolbits [|flags2.(4); flags2.(5); flags2.(6); flags2.(7)|] in
     (* Third byte: b1 *)
     let has_actuator = flags1.(1) in
-    let has_inactive = flags1.(2) in           (* Is this referring to the actuator? *)
+    let has_inactive = flags1.(2) in     (* Is this referring to the actuator? *)
     let has_tile_color = flags1.(3) in
     let has_wall_color = flags1.(4) in
     let has_wire4 = flags1.(5) in
 
-    let tile_type =
-      if not (tile_is TF_TileActive) then
-        if tile_is TF_Int16Tile 
-        then input_int16 in_ch
-        else input_byte in_ch
-      else 0
+    let tile_type = 
+      if has_tile_active && has_int16_tile_type then 
+        Solid (input_int16 in_ch)
+      else if has_tile_active then 
+        Solid (input_byte in_ch)
+      else 
+        NoType
     in
 
     let frame = 
-      if importance.(tile_type) 
-      then begin 
-        let x = input_int16 in_ch in
-        let y = input_int16 in_ch in
-        Frame (x,y)
-      end
-      else NoFrame
-
-      in
+      match tile_type with
+        | Solid tt when importance.(tt) ->
+           (let x = input_int16 in_ch in
+            let y = input_int16 in_ch in
+            Frame (x,y))
+        | NoType | Liquid _ -> NoFrame
+    in
 
     let tile_color = 
-      if tile_is TF_TileActive 
-      then read_color_if TF_HasTileColor 
+      if has_tile_color
+      then Color (input_byte in_ch)
       else NoColor
     in
 
     let wall =
-      if tile_is TF_HasWall then 
-        Wall ((input_byte in_ch),
-              (read_color_if TF_WallHasColor))
+      if has_wall 
+      then Wall (input_byte in_ch)
       else NoWall
     in
 
-    let liquid = 
-      if tile_is TF_Liquid then
-        match (input_byte in_ch) with 
-          | 0 -> Water
-          | 1 -> Lava
-          | 2 -> Honey
-          | _ -> NoLiquid
-      else 
-        NoLiquid
+    let wall_color = 
+      if has_wall && has_wall_color 
+      then Color (input_byte in_ch)
+      else NoColor
+    in
+
+    (* Test for liquid *)
+    let tile_type = 
+      if has_liquid 
+      then Liquid (input_byte in_ch)
+      else tile_type
     in
 
     let wire = 
-      if tile_is TF_Wire then Wire1
-      else if tile_is TF_Wire2 then Wire2
-      else if tile_is TF_Wire3 then Wire3
-      else if tile_is TF_Wire4 then Wire4
+      if has_wire1 then Wire1
+      else if has_wire2 then Wire2
+      else if has_wire3 then Wire3
+      else if has_wire4 then Wire4
       else NoWire
     in
 
-    let form = 
-      let d = 
-        List.find 
-          (function 
-            | TF_Slope n -> true 
-            | _ -> false)
-          flags
-      in
-      let slope = 
-        match d with
-          | TF_Slope n -> n
-          | _ -> 0
-      in
-      if slope = 0  (*Note: check if tile type is solid!*)
-        then NoSlope
-        else if slope == 1 then HalfBrick
-        else Slope (slope - 1)
+    let slope = 
+      if slope = 1 then HalfBrick
+      else if slope = 0 then Flat
+      else Slope (slope - 1)
     in
 
-    let actuator = tile_is TF_Actuator in
-    let inactive = tile_is TF_Inactive in
+    let actuator = has_actuator in
+    let inactive = has_inactive in
 
     let rle_k = 
-      if tile_is TF_Int16RLE then input_int16 in_ch
-      else if tile_is TF_Int8RLE then input_byte in_ch
+      if has_int16_rle then input_int16 in_ch
+      else if has_int8_rle then input_byte in_ch
       else 0
     in
     ()
