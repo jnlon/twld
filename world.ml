@@ -296,7 +296,15 @@ let print_header_pair p =
   Printf.printf "%s: %s\n" (fst p) (string_of_header_data (snd p)) ;;
 
 
-(**)
+(* Better approach: we have a type for the flags, then use small functions to
+ * ask what is happening *)
+
+type tile_flags = 
+  { b3 : int ;
+    b2 : int ;
+    b1 : int } ;;
+
+(*
 type tile_flags = 
   (* B3 *)
   | TF_HasB2      (* 1 *)
@@ -320,55 +328,34 @@ type tile_flags =
   | TF_Wire4        (* 32 *)
   (* Misc *)
   | TF_None
+*)
 
-(* Returns a list of tokens that tell us what to read *)
+let byte_to_boolbits (byte : int) =
+  let (|.|) data bit = data land bit == bit in
+  [| byte |.| 1 ;
+     byte |.| 2 ;
+     byte |.| 4 ;
+     byte |.| 8 ;
+     byte |.| 16 ;
+     byte |.| 32 ;
+     byte |.| 64 ;
+     byte |.| 128 |] ;;
+
+(* Integer exponent *)
+let rec ( ^^ ) base exp =
+  if exp = 0 then 1
+  else if exp = 1 then base
+  else (base*(base ^^ (exp-1))) ;;
+
+let int_of_boolbits arr =
+  let sum tosum = Array.fold_left (fun x1 x2 -> x1+x2) 0 tosum in
+  sum @@ Array.mapi (fun i x -> if x then (2 ^^ i) else 0) arr ;;
+
 let read_tile_flags in_ch = 
-  let (|.|) data bit = data land bit == bit 
-  in
-  let if_bit data n itm = 
-    if (data |.| n) then itm else TF_None
-  in
-  let read_tile_flags_3 () =
-    let b = input_byte in_ch in
-    List.filter (fun x -> x = TF_None)
-    [ if_bit b 1 TF_HasB2;
-      if_bit b 2 TF_TileActive;
-      if_bit b 4 TF_HasWall;
-      if_bit b 8 TF_Liquid;
-      if_bit b 32 TF_Int16Tile;
-      if_bit b 64 TF_Int8RLE;
-      if_bit b 128 TF_Int16RLE; ]
-  in
-  let read_tile_flags_2 () =
-    let b = input_byte in_ch in
-    List.filter (fun x -> x = TF_None)
-    [ if_bit b 1 TF_HasB1;
-      if_bit b 2 TF_Wire;
-      if_bit b 4 TF_Wire2;
-      if_bit b 8 TF_Wire3;
-      TF_Slope (b lsr 4); ]
-  in
-  let read_tile_flags_1 () =
-    let b = input_byte in_ch in
-    List.filter (fun x -> x = TF_None)
-    [ if_bit b 2 TF_Actuator;
-      if_bit b 4 TF_Inactive;
-      if_bit b 8 TF_HasTileColor;
-      if_bit b 16 TF_WallHasColor;
-      if_bit b 32 TF_Wire4; ]
-  in
-  let flags3 = read_tile_flags_3 () 
-  in
-  let flags2 = if (List.mem TF_HasB2 flags3) 
-               then read_tile_flags_2 ()
-               else []
-  in
-  let flags1 = if (List.mem TF_HasB1 flags2) 
-               then read_tile_flags_1 ()
-               else []
-  in
-  flags3 @ flags2 @ flags1
-;;
+  let flags3 = byte_to_bool_arr @@ input_byte in_ch in
+  let flags2 = byte_to_bool_arr @@ if (flags3.(0)) then input_byte in_ch else 0 in
+  let flags1 = byte_to_bool_arr @@ if (flags2.(0)) then input_byte in_ch else 0 in
+  (flags3,flags2,flags1) ;;
 
 let read_tiles in_ch header = 
   Log.infoln "loading tiles...";
@@ -382,15 +369,29 @@ let read_tiles in_ch header =
     b1 lor (b2 lsl 8)
   in
 
+  (* A beautiful abstraction over this cluster f*** of a format *)
   let read_tile () =
-    let flags = read_tile_flags in_ch in
-    let tile_is flag = List.mem flag flags in
-
-    let read_color_if condition = 
-      if tile_is condition
-        then Color (input_byte in_ch)
-        else NoColor
-    in
+    (* These flags tell us how many bytes we need to read to extract all the
+     * information from this tile *)
+    let flags3,flags2,flags1 = read_tile_flags in_ch in
+    (* First byte: b3 (everything past this is optional) *)
+    let has_tile_active = flags.(1) in
+    let has_wall = flags3.(2) in
+    let has_liquid = flags3.(3) || flags.(4) in 
+    let has_int16_tile = flags3.(6)
+    let has_int8_rle = flags3.(6)
+    let has_int16_rle = flags3.(7)
+    (* Second byte: b2 *)
+    let has_wire1 = flags2.(1) in
+    let has_wire2 = flags2.(2) in
+    let has_wire3 = flags2.(3) in
+    let slope = int_of_boolbits [|flags2.(4); flags.(5); flags.(6); flags.(7)|]
+    (* Third byte: b1 *)
+    let has_actuator = flags1.(1) in
+    let has_inactive = flags1.(2) in           (* Is this referring to the actuator? *)
+    let has_tile_color = flags1.(3) in
+    let has_wall_color = flags1.(4) in
+    let has_wire4 = flags1.(5) in
 
     let tile_type =
       if not (tile_is TF_TileActive) then
