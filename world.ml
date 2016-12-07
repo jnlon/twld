@@ -36,7 +36,7 @@ type tile_type = NoType | Solid of tile_solid | Liquid of tile_liquid ;;
 type tile_wall = NoWall | Wall of wall_type ;;
 type tile_frame = NoFrame | Frame of (x * y) ;; 
 type tile_wire = NoWire | Wire1 | Wire2 | Wire3 | Wire4
-type tile_slope = Flat | HalfBrick | Slope of int ;;
+type tile_slope = NoSlope | HalfBrick | Slope of int ;;
 type tile_color = NoColor | Color of int ;;
 
 type tile_background = 
@@ -122,8 +122,7 @@ let header_pairs = [
    ("_num_position", Int16);
    ("positions", Array (Int32, Static 10));
    ("_num_importance", Int16);
-   ("importance", Array (Bool, Static 58));
-
+   ("importance", Array (Byte, Static 58));
    ("world_name", String);
    ("world_id", Int32);
    ("left_world_boundary", Int32);
@@ -245,6 +244,7 @@ let header_pairs = [
    ("temp_sandstorm_severity", Single);
    ("temp_sandstorm_intended_severity", Single) ] ;;
 
+
 let read_header_from_pair in_chan (previously_read : header) pair : header =
   let rec data_of_pair = function
     | (key, Int64) -> (key, HInt (read_int64 in_chan))
@@ -267,6 +267,10 @@ let read_header_from_pair in_chan (previously_read : header) pair : header =
        let strings = read_string_array in_chan n in
        (key, HArray (Array.map (fun b -> HString b) strings))
      end
+    | (key, Array (Byte, Static n)) -> begin
+      let bytes = read_byte_array in_chan n in
+      (key, HArray (Array.map (fun b -> HByte b) bytes))
+    end
     | (key, Array (t, Variable prior_key)) ->  begin  (* Convert Variable types to Static*)
        let amount = 
          match (List.assoc prior_key previously_read) with
@@ -329,28 +333,117 @@ let read_tile_flags in_ch =
   let flags1 = byte_to_boolbits @@ if (flags2.(0)) then input_byte in_ch else 0 in
   (flags3,flags2,flags1) ;;
 
-let read_tiles in_ch header = 
-  Log.infoln "loading tiles...";
-  let max_x = Util.int_of_bytes (List.assoc "max_tiles_x" header) in
-  let max_y = Util.int_of_bytes (List.assoc "max_tiles_y" header) in
-  let importance = Util.bool_array_of_bits (List.assoc "importance" header) in
+type tile_read = 
+  { t : tile ;
+    k : int } ;;
 
-  let input_int16 in_ch = 
-    let b1 = input_byte in_ch in
-    let b2 = input_byte in_ch in
-    b1 lor (b2 lsl 8)
+let wire_to_string = function
+  | NoWire -> "NoWire"
+  | Wire1 -> "Wire1"
+  | Wire2 -> "Wire2"
+  | Wire3 -> "Wire3"
+  | Wire4 -> "Wire4" ;;
+
+let wall_to_string = function
+  | NoWall -> "NoWall"
+  | Wall n -> Printf.sprintf "Wall (%d)" n ;;
+
+let color_to_string = function
+  | NoColor -> "NoCoor"
+  | Color n -> Printf.sprintf "Color (%d)" n ;;
+
+let tile_t_to_string = function
+  | NoType -> "NoType"
+  | Solid n ->  Printf.sprintf "Solid (%d)" n
+  | Liquid l ->  Printf.sprintf "Liquid (%d)" l ;;
+
+let frame_to_string = function
+  | NoFrame -> "NoFrame"
+  | Frame (x,y) -> Printf.sprintf "(%d,%d)" x y ;;
+
+let slope_to_string = function
+  | Slope sl -> Printf.sprintf "%d" sl
+  | HalfBrick -> "HalfBrick"
+  | NoSlope -> "NoSlope" ;;
+
+let tile_to_string = function
+  | EmptyTile -> "EmptyTile"
+  | Tile data -> begin
+      let back = data.back in
+      let front = data.front in
+      (
+        Printf.sprintf "\n   Front: type = %s, color = %s, frame = %s, slope = %s"
+        (tile_t_to_string front.t) (color_to_string front.color) (frame_to_string front.frame)
+        (slope_to_string front.slope)
+      ) ^ (
+        Printf.sprintf "\n   Back: wire = %s, wall = %s, color = %s, actuator = %b, inactive = %b\n"
+        (wire_to_string back.wire) (wall_to_string back.wall) (color_to_string back.color)
+        back.actuator back.inactive
+      )
+  end
+;;
+
+
+
+let read_tiles in_ch header = 
+
+  let get_header_int = function
+    | HInt i64 -> Int64.to_int i64
+    | _ -> raise @@ Invalid_argument "want int!"
   in
 
+  let get_header_byte = function
+    | HByte b -> b
+    | _ -> raise @@ Invalid_argument "want int!"
+  in
+
+
+  let get_header_bool = function
+    | HBool b -> b
+    | _ -> raise @@ Invalid_argument "want bool!"
+  in
+
+  let get_byte_array = function
+    | HArray arr -> Array.map get_header_byte arr
+    | _ -> raise @@ Invalid_argument "want array!"
+  in
+
+  let get_bool_array = function
+    | HArray arr -> Array.map get_header_bool arr
+    | _ -> raise @@ Invalid_argument "want array!"
+  in
+
+  Log.infoln "loading tiles...";
+  let max_x = get_header_int (List.assoc "max_tiles_x" header) in
+  let max_y = get_header_int (List.assoc "max_tiles_y" header) in
+  let importance_ints = Array.to_list @@ (get_byte_array (List.assoc "importance" header)) in 
+  let importance = Array.concat @@ List.map (byte_to_boolbits) importance_ints in
+  Printf.printf "importance = length %d\n" (Array.length importance);
+  
+  let tiles = Array.make_matrix max_y max_x EmptyTile in
+
+  let input_int16 = read_int16 in
+
   (* A beautiful abstraction over this cluster f*** of a format *)
-  let read_tile () =
+  let read_tile () : tile_read =
+    let open Printf in
+
+    printf "begin read tile: pos_in = %d\n" (pos_in in_ch);
+
+    let flags_to_string bools = 
+      String.concat "," @@ Array.to_list @@ Array.map string_of_bool bools
+    in
     (* These flags indicate how much we need to read to extract all the
      * information from the series of bytes representing this tile *)
     let flags3,flags2,flags1 = read_tile_flags in_ch in
+    (*printf "\nis it flags3: %s\n" @@ flags_to_string flags3;
+    printf "is it flags2: %s\n" @@ flags_to_string flags2;
+    printf "is it flags1: %s\n" @@ flags_to_string flags1;*)
     (* First byte: b3 (everything past this is optional) *)
     let has_tile_active = flags3.(1) in
     let has_wall = flags3.(2) in
     let has_liquid = flags3.(3) || flags3.(4) in 
-    let has_int16_tile_type = flags3.(6) in
+    let has_int16_tile_type = flags3.(5) in
     let has_int8_rle = flags3.(6) in
     let has_int16_rle = flags3.(7) in
     (* Second byte: b2 *)
@@ -360,7 +453,7 @@ let read_tiles in_ch header =
     let slope = int_of_boolbits [|flags2.(4); flags2.(5); flags2.(6); flags2.(7)|] in
     (* Third byte: b1 *)
     let has_actuator = flags1.(1) in
-    let has_inactive = flags1.(2) in     (* Is this referring to the actuator? *)
+    let has_inactive = flags1.(2) in 
     let has_tile_color = flags1.(3) in
     let has_wall_color = flags1.(4) in
     let has_wire4 = flags1.(5) in
@@ -374,13 +467,15 @@ let read_tiles in_ch header =
         NoType
     in
 
+    Printf.printf "%s\n" (tile_t_to_string tile_type);
+
     let frame = 
       match tile_type with
         | Solid tt when importance.(tt) ->
            (let x = input_int16 in_ch in
             let y = input_int16 in_ch in
             Frame (x,y))
-        | NoType | Liquid _ -> NoFrame
+        | _ -> NoFrame
     in
 
     let tile_color = 
@@ -418,7 +513,7 @@ let read_tiles in_ch header =
 
     let slope = 
       if slope = 1 then HalfBrick
-      else if slope = 0 then Flat
+      else if slope = 0 then NoSlope
       else Slope (slope - 1)
     in
 
@@ -430,10 +525,76 @@ let read_tiles in_ch header =
       else if has_int8_rle then input_byte in_ch
       else 0
     in
-    ()
+
+    let is_empty_tile = 
+      tile_type = NoType && 
+      frame = NoFrame &&
+      wall = NoWall &&
+      wire = NoWire && 
+      not actuator 
+    in
+
+    (* Finally, put the tile together *)
+    if is_empty_tile 
+    then 
+      { t = EmptyTile 
+      ; k = rle_k }
+    else begin
+      let foreground = 
+        { t = tile_type ;
+          color = tile_color ;
+          frame = frame ;
+          slope = slope } 
+      in
+      let background =
+        { wire = wire ;
+          wall = wall ;
+          color = wall_color ;
+          actuator = actuator ;
+          inactive = inactive } 
+      in
+      { t = Tile { front = foreground ; back = background } ;
+        k = rle_k }
+    end
   in
 
-  () ;;
+  Printf.printf "max_x = %d, max_y = %d\n" max_x max_y;
+  Array.iter (fun b -> Printf.printf "%b " b) importance;
+
+  for x=0 to (max_x-1) do
+    Log.infof "loading tile row %d/%d\n" (x+1) max_x;
+    (*printf.printf "--> new x: %d (max_x = %d, max_y = %d)\n" x max_x max_y;*)
+    let rec for_every_y y =
+      if y >= max_y then ()
+      else begin
+        let tile_raw = read_tile () in 
+        let rle_count = tile_raw.k in
+        let tile = tile_raw.t in
+
+        Printf.printf "tile_to_string: %s\n" (tile_to_string tile);
+
+        (*let rle_count = 0 in
+        let tile = EmptyTile in*)
+
+        (* log everything here *)
+        Printf.printf "y = %d, x = %d, k = %d\n" y x rle_count;
+
+        (* set tile at y,x *)
+        tiles.(y).(x) <- tile;
+
+        (* copy tile data rle times down *)
+        for y_with_rle=(y+1) to (y+rle_count) do 
+          tiles.(y_with_rle).(x) <- tile
+        done;
+
+        (* continue down column *)
+        for_every_y (rle_count + y + 1)
+      end 
+    in
+    for_every_y 0;
+  done;
+  tiles 
+;;
 
 (*let read_tiles in_ch header = 
   Log.infoln "loading tiles...";
@@ -559,3 +720,5 @@ let world_of_file path = () ;;
 let world_of_buffer bytes = () ;;
 (* Saving functions *)
 let save_world_to_file world = () ;;
+
+Printexc.record_backtrace true

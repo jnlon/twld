@@ -89,5 +89,12 @@ module Pervasives = struct
     done;
     arr ;;
 
+  let read_byte_array in_ch n = 
+    let arr = Array.make n 0 in
+    for i=0 to (n-1) do
+      arr.(i) <- (input_byte in_ch)
+    done;
+    arr ;;
+
 end;;
 
