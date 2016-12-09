@@ -31,19 +31,13 @@ end;;
 module Pervasives = struct
   include Pervasives
 
-  let input_byte_array nbytes in_ch = 
-    let arr = Array.make nbytes 0 in
-    for i=0 to (nbytes-1) do
-      arr.(i) <- (input_byte in_ch)
-    done;
-    arr ;;
-
   let read_bool in_ch =
     (input_byte in_ch) > 0 ;;
 
   let read_pascal_string in_ch = 
     let strlen = input_byte in_ch in
-    really_input_string in_ch strlen ;;
+    if strlen = 0 then "" 
+    else really_input_string in_ch strlen ;;
 
   (* TODO: Remove duplicate code in read_int *)
 

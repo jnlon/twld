@@ -499,8 +499,7 @@ let read_tiles in_ch header =
     end
   in
 
-  Printf.printf "max_x = %d, max_y = %d\n" max_x max_y;
-  Array.iter (fun b -> Printf.printf "%b " b) importance;
+  (*Printf.printf "max_x = %d, max_y = %d\n" max_x max_y;*)
 
   for x=0 to (max_x-1) do
     Log.infof "loading tile row %d/%d\n" (x+1) max_x;
@@ -513,7 +512,7 @@ let read_tiles in_ch header =
         let tile = tile_raw.t in
 
         (* log everything here *)
-        Printf.printf "y = %d, x = %d, k = %d, tile = %s\n" y x rle_count (tile_tt_to_string tile);
+        Log.debugf "y = %d, x = %d, k = %d, tile = %s\n" y x rle_count (tile_tt_to_string tile);
 
         (* set tile at y,x *)
         tiles.(y).(x) <- tile;
@@ -538,12 +537,15 @@ let read_chests in_ch =
   let items_to_skip = max (chest_capacity - 40) 0 in (* item overflow *)
   let chest_capacity = min chest_capacity 40 in (* Cap to 40 items *)
 
+  Printf.printf "num_chests = %d, skip=%d, cap=%d (@ %d)\n" num_chests items_to_skip chest_capacity (pos_in in_ch);
+
   let rec read_chest_items n = 
     if n == 0 then []
     else begin
       let stack = read_i16 in_ch in
       let id = Int32.to_int @@ read_i32 in_ch in
       let prefix = input_byte in_ch in
+      Printf.printf "Item: stack=%d,id=%d,prefix=%d\n" stack id prefix;
       {id=id;stack=stack;prefix=prefix} :: (read_chest_items (n-1))
     end
   in
@@ -552,20 +554,24 @@ let read_chests in_ch =
     let x = Int32.to_int @@ read_i32 in_ch in
     let y = Int32.to_int @@ read_i32 in_ch in
     let name = read_pascal_string in_ch in
-    { pos = { x = x; y = y } ;
-      name = name ; 
-      items = read_chest_items chest_capacity }
+    Printf.printf "Chest: x=%d,y=%d,name='%s'\n" x y name;
+    let item = 
+      { pos = { x = x; y = y } ;
+        name = name ; 
+        items = read_chest_items chest_capacity }
+    in
+    for i=0 to items_to_skip do
+      if ((read_i16 in_ch) > 0) then
+        (ignore @@ read_i32 in_ch;
+        ignore @@ input_byte in_ch)
+      else ()
+    done;
+    item
   in
 
   let chests = Array.init num_chests (fun i -> read_chest in_ch) in
 
-  for i=0 to items_to_skip do
-    ignore @@ read_i32 in_ch;
-    ignore @@ input_byte in_ch;
-  done;
-
   chests
-
 ;;
 
 let read_signs in_ch = () ;;

@@ -8,4 +8,5 @@ let header = World.read_header inch in
 let tiles = World.read_tiles inch header in
 (*World.print_header header;*)
 tiles;
-World.read_chests inch
+let chests = World.read_chests inch in
+chests;
