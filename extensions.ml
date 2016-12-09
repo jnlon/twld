@@ -69,22 +69,10 @@ module Pervasives = struct
     i32_1 ||| (i32_2 <<< 32) ;;
 
   let read_single in_ch = 
-    Int32.to_float @@ read_int32 in_ch ;;
+    Int32.to_float @@ read_i32 in_ch ;;
 
   let read_double in_ch = 
-    Int64.to_float @@ read_int64 in_ch ;;
-
-  let read_int32_array in_ch n = 
-    Array.init (fun i -> read_int32 in_ch) n ;;
-
-  let read_bool_array in_ch n = 
-    Array.init (fun i -> read_bool in_ch) n ;;
-
-  let read_string_array in_ch n = 
-    Array.init (fun i -> read_pascal_string in_ch) n ;;
-
-  let read_byte_array in_ch n = 
-    Array.init (fun i -> input_byte in_ch) n ;;
+    Int64.to_float @@ read_i64 in_ch ;;
 
   (* Integer exponent *)
   let rec ( ^^ ) base exp =

@@ -5,27 +5,23 @@ exception Read_type_unsupported of string ;;
 exception Unknown_array_size_type of string ;;
 let supported_wld_version = 156;;
 
-type array_size =
-  | Static of int (* fixed number of elements *)
-  | Variable of string (* Use string as key to the number of elements *) ;;
+type header_data = 
+  | Bool of bool | Byte of int
+  | Int16 of int | Int32 of int32 | Int64 of int64
+  | Single of float | Double of float
+  | Array of header_data array
+  | String of string
+  | Unknown ;;
 
-type read_type = 
-  | Bool | Byte 
-  | Int16 | Int32 | Int64
-  | Single | Double
-  | Array of (read_type * array_size)
-  | String ;;
+let int_of_header_data = function 
+  | Int16 i -> i
+  | Int32 i32 -> Int32.to_int i32
+  | Int64 i64 -> Int64.to_int i64
+  | Double f | Single f -> int_of_float f
+  | _ -> raise @@ Invalid_argument "Can't convert type in int_of_data_type" ;;
 
-type header_value = 
-  | HBool of bool 
-  | HByte of int
-  | HInt of int64
-  | HFloat of float
-  | HArray of header_value array
-  | HString of string ;;
-
-type header_pair = (string * header_value) ;;
-type header = header_pair list ;;
+(* Assoc list of header values *)
+type header = (string * header_data) list ;;
 
 type x = int ;;
 type y = int ;;
@@ -104,208 +100,6 @@ type world =
     entities: entity array ;
     pressure_plates: pressure_plate array } ;;
 
-let rec byte_size_of_type = function
-  | Bool | Byte -> 1
-  | Int16 -> 2
-  | Int32 | Single -> 4
-  | Int64 | Double -> 8
-  | Array (t, Static array_size) -> 
-      (byte_size_of_type t) * array_size 
-  | String | _ -> 0 ;;
-
-type header_read_pairs_t = (string * read_type ) list ;;
-let header_pairs = [
-   ("version", Int32); 
-   ("relogic", Int64);
-   ("revision", Int32);
-   ("favorite", Int64);
-   ("_num_position", Int16);
-   ("positions", Array (Int32, Static 10));
-   ("_num_importance", Int16);
-   ("importance", Array (Byte, Static 58));
-   ("world_name", String);
-   ("world_id", Int32);
-   ("left_world_boundary", Int32);
-   ("right_world_boundary", Int32);
-   ("top_world_boundary", Int32);
-   ("bottom_world_boundary", Int32);
-   ("max_tiles_y", Int32);
-   ("max_tiles_x", Int32);
-   ("expert_mode", Bool);
-   ("creation_time", Double);
-   ("moon_type", Byte);
-   ("tree_x", Array (Int32, Static 3)); (* size = 3 *)
-   ("tree_style", Array (Int32, Static 4)); (* size = 4 *)
-   ("cave_back_x", Array (Int32, Static 3)); (* size = 3 *)
-   ("cave_back_style", Array (Int32, Static 4)); (* size = 4 *)
-   ("ice_back_style", Int32);
-   ("jungle_back_style", Int32);
-   ("hell_back_style", Int32);
-   ("spawn_tile_x", Int32);
-   ("spawn_tile_y", Int32);
-   ("world_surface", Double);
-   ("rock_layer", Double);
-   ("temp_time", Double);
-   ("temp_day_time", Bool);
-   ("temp_moon_phase", Int32);
-   ("temp_blood_moon", Bool);
-   ("temp_eclipse", Bool);
-   ("dungeon_x", Int32);
-   ("dungeon_y", Int32);
-   ("crimson", Bool);
-
-   ("downed_boss_1", Bool);
-   ("downed_boss_2", Bool);
-   ("downed_boss_3", Bool);
-   ("downed_queen_bee", Bool);
-   ("downed_mech_boss_1", Bool);
-   ("downed_mech_boss_2", Bool);
-   ("downed_mech_boss_3", Bool);
-   ("downed_mech_boss_any", Bool);
-   ("downed_plant_boss", Bool);
-   ("downed_golem_boss", Bool);
-   ("downed_slime_king", Bool);
-   ("saved_goblin", Bool);
-   ("saved_wizard", Bool);
-   ("saved_mech", Bool);
-   ("downed_goblins", Bool);
-   ("downed_clown", Bool);
-   ("downed_frost", Bool);
-   ("downed_pirates", Bool);
-   ("shadow_orb_smashed", Bool);
-   ("spawn_meteor", Bool);
-   ("shadow_orb_count", Byte);
-   ("altar_count", Int32);
-   ("hard_mode", Bool);
-   ("invasion_delay", Int32);
-   ("invasion_size", Int32);
-   ("invasion_type", Int32);
-   ("invasion_x", Double);
-
-   ("slime_rain_time", Double);
-   ("sundial_cooldown", Byte);
-   ("temp_raining", Bool);
-   ("temp_rain_time", Int32);
-   ("temp_max_rain", Single);
-   ("ore_tier1", Int32);
-   ("ore_tier2", Int32);
-   ("ore_tier3", Int32);
-   ("tree_bg", Byte);
-   ("corrupt_bg", Byte);
-   ("jungle_bg", Byte);
-   ("snow_bg", Byte);
-   ("hallow_bg", Byte);
-   ("crimson_bg", Byte);
-   ("desert_bg", Byte);
-   ("ocean_bg", Byte);
-   ("cloud_bg_active", Int32);
-   ("num_clouds", Int16);
-   ("wind_speed", Single);
-   ("_num_angler_finished", Int32);
-   ("angler_who_finished_today", Array (String, Variable "_num_angler_finished"));
-   ("saved_angler", Bool);
-   ("angler_quest", Int32);
-   ("saved_stylist", Bool);
-   ("saved_tax_collector", Bool);
-   ("invasion_size_start", Int32);
-   ("temp_cultist_delay", Int32);
-   ("_num_npc_killed", Int16);
-   ("npc_kill_count", Array (Int32, Variable "_num_npc_killed"));
-   ("fast_forward_time", Bool);
-   ("downed_fishron", Bool);
-   ("downed_martians", Bool);
-   ("downed_ancient_cultist", Bool);
-   ("downed_moonlord", Bool);
-   ("downed_halloween_king", Bool);
-   ("downed_halloween_tree", Bool);
-   ("downed_christmas_ice_queen", Bool);
-   ("downed_christmas_santank", Bool);
-   ("downed_christmas_tree", Bool);
-
-   ("downed_tower_solar", Bool);
-   ("downed_tower_vortex", Bool);
-   ("downed_tower_nebula", Bool);
-   ("downed_tower_stardust", Bool);
-
-   ("tower_active_solar", Bool);
-   ("tower_active_vortex", Bool);
-   ("tower_active_nebula", Bool);
-   ("tower_active_stardust", Bool);
-   ("lunar_apocalypse_is_up", Bool);
-   (* v 170 *)
-   ("temp_party_manual", Bool);
-   ("temp_party_genuine", Bool);
-   ("temp_party_cooldown", Int32);
-   ("_num_celebrating", Int32);
-   ("temp_party_celebrating_npcs", Array (Int32, Variable "_num_celebrating"));
-   (* v 174*)
-   ("temp_sandstorm_happening", Bool);
-   ("temp_sandstorm_time_left", Int32);
-   ("temp_sandstorm_severity", Single);
-   ("temp_sandstorm_intended_severity", Single) ] ;;
-
-
-let read_header_from_pair in_chan (previously_read : header) pair : header =
-  let rec data_of_pair = function
-    | (key, Int64) -> (key, HInt (read_int64 in_chan))
-    | (key, Int32) -> (key, HInt (Int64.of_int32 (read_int32 in_chan)))
-    | (key, Int16) -> (key, HInt (Int64.of_int (read_int16 in_chan)))
-    | (key, Bool)  -> (key, HBool (read_bool in_chan))
-    | (key, Byte)  -> (key, HByte (read_byte in_chan))
-    | (key, String) -> (key, HString (read_pascal_string in_chan))
-    | (key, Single) -> (key, HFloat (read_single in_chan))
-    | (key, Double) -> (key, HFloat (read_double in_chan))
-    | (key, Array (Int32, Static n)) -> begin
-       let int32s = read_int32_array in_chan n in
-       (key, HArray (Array.map (fun i -> HInt (Int64.of_int32 i)) int32s))
-     end
-    | (key, Array (Bool, Static n)) -> begin
-       let bools = read_bool_array in_chan n in
-       (key, HArray (Array.map (fun b -> HBool b) bools))
-     end
-    | (key, Array (String, Static n)) -> begin
-       let strings = read_string_array in_chan n in
-       (key, HArray (Array.map (fun b -> HString b) strings))
-     end
-    | (key, Array (Byte, Static n)) -> begin
-      let bytes = read_byte_array in_chan n in
-      (key, HArray (Array.map (fun b -> HByte b) bytes))
-    end
-    | (key, Array (t, Variable prior_key)) ->  begin  (* Convert Variable types to Static*)
-       let amount = 
-         match (List.assoc prior_key previously_read) with
-           | HInt d -> Int64.to_int d
-           | _ -> raise @@ Unknown_array_size_type key
-       in
-       (data_of_pair (key, Array (t, Static amount)))
-     end
-    | (key, _) -> raise @@ Read_type_unsupported key 
-  in
-  Log.printf Log.Debug "Reading '%s'\n" (fst pair);
-  ((data_of_pair pair) :: previously_read) ;;
-
-
-let read_header inch : header = 
-  List.fold_left 
-    (read_header_from_pair inch)
-    []
-    header_pairs ;;
-
-let rec string_of_header_data d = 
-  let open Array in
-  let sprintf = Printf.sprintf in
-  match d with 
-    | HBool b -> sprintf "%b" b
-    | HByte i -> sprintf "%d" i
-    | HInt i64 -> sprintf "%Ld" i64
-    | HFloat f -> sprintf "%f" f
-    | HArray ar -> "[" ^ (String.concat "," (List.map string_of_header_data (to_list ar))) ^ "]"
-    | HString str -> "\"" ^ str ^ "\"" ;;
-
-let print_header_pair p =
-  Printf.printf "%s: %s\n" (fst p) (string_of_header_data (snd p)) ;;
-
-
 let byte_to_boolbits (byte : int) =
   let (|.|) data bit = data land bit == bit in
   [| byte |.| 1 ;
@@ -317,11 +111,169 @@ let byte_to_boolbits (byte : int) =
      byte |.| 64 ;
      byte |.| 128 |] ;;
 
-(* Integer exponent *)
-let rec ( ^^ ) base exp =
-  if exp = 0 then 1
-  else if exp = 1 then base
-  else (base*(base ^^ (exp-1))) ;;
+let rec header_data_to_string = function
+    | Bool b -> string_of_bool b
+    | Byte i | Int16 i -> string_of_int i
+    | Int32 i32 -> Int32.to_string i32
+    | Single f | Double f -> string_of_float f
+    | Int64 i64 -> Int64.to_string i64
+    | String s -> s
+    | Array a -> String.concat "," @@ List.map (header_data_to_string) (Array.to_list a)
+    | Unknown -> "?????"
+
+let print_header h = 
+  List.iter (fun s -> Printf.printf "%s: %s\n" (fst s) (header_data_to_string (snd s))) h
+
+let read_header inch = 
+  let read = function
+    | `Bool -> Bool (read_bool inch)
+    | `Byte -> Byte (input_byte inch)
+    | `Int16 -> Int16 (read_i16 inch)
+    | `Int32 -> Int32 (read_i32 inch)
+    | `Single -> Single (read_single inch)
+    | `Double -> Double (read_double inch)
+    | `Int64 -> Int64 (read_i64 inch)
+    | `String -> String (read_pascal_string inch)
+    | `ArrayString n -> Array (Array.init n (fun i -> String (read_pascal_string inch)))
+    | `ArrayInt32 n -> Array (Array.init n (fun i -> Int32 (read_i32 inch)))
+    | `ArrayBitBool n -> begin (* where n is # of bytes, not bits *)
+        let read_boolbits () = byte_to_boolbits (input_byte inch) in
+        Array (Array.init n (fun i -> Array (Array.map (fun b -> Bool b) (read_boolbits ()))))
+      end
+    | _ -> raise @@ Invalid_argument "Unknown type passed to read"
+  in
+
+  let a = Array.make 122 ("",(Unknown)) in
+  a.(0) <- ("version", read `Int32); 
+  a.(1) <- ("relogic", read `Int64);
+  a.(2) <- ("revision", read `Int32);
+  a.(3) <- ("favorite", read `Int64);
+  a.(4) <- ("_num_position", read `Int16);
+  a.(5) <- ("positions", read (`ArrayInt32 10));
+  a.(6) <- ("_num_importance", read `Int16);
+  a.(7) <- ("importance", read (`ArrayBitBool 58));
+  a.(8) <- ("world_name", read `String);
+  a.(9) <- ("world_id", read `Int32);
+  a.(10) <- ("left_world_boundary", read `Int32);
+  a.(11) <- ("right_world_boundary", read `Int32);
+  a.(12) <- ("top_world_boundary", read `Int32);
+  a.(13) <- ("bottom_world_boundary", read `Int32);
+  a.(14) <- ("max_tiles_y", read `Int32);
+  a.(15) <- ("max_tiles_x", read `Int32);
+  a.(16) <- ("expert_mode", read `Bool);
+  a.(17) <- ("creation_time", read `Double);
+  a.(18) <- ("moon_type", read `Byte);
+  a.(19) <- ("tree_x", read (`ArrayInt32 3)); (* size = 3 *)
+  a.(20) <- ("tree_style", read (`ArrayInt32 4)); (* size = 4 *)
+  a.(21) <- ("cave_back_x", read (`ArrayInt32 3)); (* size = 3 *)
+  a.(22) <- ("cave_back_style", read (`ArrayInt32 4)); (* size = 4 *)
+  a.(23) <- ("ice_back_style", read `Int32);
+  a.(24) <- ("jungle_back_style", read `Int32);
+  a.(25) <- ("hell_back_style", read `Int32);
+  a.(26) <- ("spawn_tile_x", read `Int32);
+  a.(27) <- ("spawn_tile_y", read `Int32);
+  a.(28) <- ("world_surface", read `Double);
+  a.(29) <- ("rock_layer", read `Double);
+  a.(30) <- ("temp_time", read `Double);
+  a.(31) <- ("temp_day_time", read `Bool);
+  a.(32) <- ("temp_moon_phase", read `Int32);
+  a.(33) <- ("temp_blood_moon", read `Bool);
+  a.(34) <- ("temp_eclipse", read `Bool);
+  a.(35) <- ("dungeon_x", read `Int32);
+  a.(36) <- ("dungeon_y", read `Int32);
+  a.(37) <- ("crimson", read `Bool);
+  a.(38) <- ("downed_boss_1", read `Bool);
+  a.(39) <- ("downed_boss_2", read `Bool);
+  a.(40) <- ("downed_boss_3", read `Bool);
+  a.(41) <- ("downed_queen_bee", read `Bool);
+  a.(42) <- ("downed_mech_boss_1", read `Bool);
+  a.(43) <- ("downed_mech_boss_2", read `Bool);
+  a.(44) <- ("downed_mech_boss_3", read `Bool);
+  a.(45) <- ("downed_mech_boss_any", read `Bool);
+  a.(46) <- ("downed_plant_boss", read `Bool);
+  a.(47) <- ("downed_golem_boss", read `Bool);
+  a.(48) <- ("downed_slime_king", read `Bool);
+  a.(49) <- ("saved_goblin", read `Bool);
+  a.(50) <- ("saved_wizard", read `Bool);
+  a.(51) <- ("saved_mech", read `Bool);
+  a.(52) <- ("downed_goblins", read `Bool);
+  a.(53) <- ("downed_clown", read `Bool);
+  a.(54) <- ("downed_frost", read `Bool);
+  a.(55) <- ("downed_pirates", read `Bool);
+  a.(56) <- ("shadow_orb_smashed", read `Bool);
+  a.(57) <- ("spawn_meteor", read `Bool);
+  a.(58) <- ("shadow_orb_count", read `Byte);
+  a.(59) <- ("altar_count", read `Int32);
+  a.(60) <- ("hard_mode", read `Bool);
+  a.(61) <- ("invasion_delay", read `Int32);
+  a.(62) <- ("invasion_size", read `Int32);
+  a.(63) <- ("invasion_type", read `Int32);
+  a.(64) <- ("invasion_x", read `Double);
+  a.(65) <- ("slime_rain_time", read `Double);
+  a.(66) <- ("sundial_cooldown", read `Byte);
+  a.(67) <- ("temp_raining", read `Bool);
+  a.(68) <- ("temp_rain_time", read `Int32);
+  a.(69) <- ("temp_max_rain", read `Single);
+  a.(70) <- ("ore_tier1", read `Int32);
+  a.(71) <- ("ore_tier2", read `Int32);
+  a.(72) <- ("ore_tier3", read `Int32);
+  a.(73) <- ("tree_bg", read `Byte);
+  a.(74) <- ("corrupt_bg", read `Byte);
+  a.(75) <- ("jungle_bg", read `Byte);
+  a.(76) <- ("snow_bg", read `Byte);
+  a.(77) <- ("hallow_bg", read `Byte);
+  a.(78) <- ("crimson_bg", read `Byte);
+  a.(79) <- ("desert_bg", read `Byte);
+  a.(80) <- ("ocean_bg", read `Byte);
+  a.(81) <- ("cloud_bg_active", read `Int32);
+  a.(82) <- ("num_clouds", read `Int16);
+  a.(83) <- ("wind_speed", read `Single);
+  a.(84) <- ("_num_angler_finished", read `Int32);
+  a.(85) <- ("angler_who_finished_today", read (`ArrayString (int_of_header_data (snd a.(84)))));
+  a.(86) <- ("saved_angler", read `Bool);
+  a.(87) <- ("angler_quest", read `Int32);
+  a.(88) <- ("saved_stylist", read `Bool);
+  a.(89) <- ("saved_tax_collector", read `Bool);
+  a.(90) <- ("invasion_size_start", read `Int32);
+  a.(91) <- ("temp_cultist_delay", read `Int32);
+  a.(92) <- ("_num_npc_killed", read `Int16);
+  a.(93) <- ("npc_kill_count", read (`ArrayInt32 (int_of_header_data (snd a.(92)))));
+  a.(94) <- ("fast_forward_time", read `Bool);
+  a.(95) <- ("downed_fishron", read `Bool);
+  a.(96) <- ("downed_martians", read `Bool);
+  a.(97) <- ("downed_ancient_cultist", read `Bool);
+  a.(98) <- ("downed_moonlord", read `Bool);
+  a.(99) <- ("downed_halloween_king", read `Bool);
+  a.(100) <- ("downed_halloween_tree", read `Bool);
+  a.(101) <- ("downed_christmas_ice_queen", read `Bool);
+  a.(102) <- ("downed_christmas_santank", read `Bool);
+  a.(103) <- ("downed_christmas_tree", read `Bool);
+  a.(104) <- ("downed_tower_solar", read `Bool);
+  a.(105) <- ("downed_tower_vortex", read `Bool);
+  a.(106) <- ("downed_tower_nebula", read `Bool);
+  a.(107) <- ("downed_tower_stardust", read `Bool);
+  a.(108) <- ("tower_active_solar", read `Bool);
+  a.(109) <- ("tower_active_vortex", read `Bool);
+  a.(110) <- ("tower_active_nebula", read `Bool);
+  a.(111) <- ("tower_active_stardust", read `Bool);
+  a.(112) <- ("lunar_apocalypse_is_up", read `Bool);
+  (* v 170 *)
+  a.(113) <- ("temp_party_manual", read `Bool);
+  a.(114) <- ("temp_party_genuine", read `Bool);
+  a.(115) <- ("temp_party_cooldown", read `Int32);
+  a.(116) <- ("_num_celebrating", read `Int32);
+  a.(117) <- ("temp_party_celebrating_npcs", read (`ArrayInt32 (int_of_header_data @@ snd a.(116))));
+  (* v 173*)
+  a.(118) <- ("temp_sandstorm_happening", read `Bool);
+  a.(119) <- ("temp_sandstorm_time_left", read `Int32);
+  a.(120) <- ("temp_sandstorm_severity", read `Single);
+  a.(121) <- ("temp_sandstorm_intended_severity", read `Single);
+
+  (* Return an assoc list from array a
+   * This provides convenient header access through List.assoc *)
+  Array.to_list a
+;;
+
 
 let int_of_boolbits arr =
   let sum tosum = Array.fold_left (fun x1 x2 -> x1+x2) 0 tosum in
@@ -349,7 +301,7 @@ let wall_to_string = function
   | Wall n -> Printf.sprintf "Wall (%d)" n ;;
 
 let color_to_string = function
-  | NoColor -> "NoCoor"
+  | NoColor -> "NoColor"
   | Color n -> Printf.sprintf "Color (%d)" n ;;
 
 let tile_t_to_string = function
@@ -380,49 +332,23 @@ let tile_to_string = function
         (wire_to_string back.wire) (wall_to_string back.wall) (color_to_string back.color)
         back.actuator back.inactive
       )
-  end
-;;
-
-
+  end ;;
 
 let read_tiles in_ch header = 
 
-  let get_header_int = function
-    | HInt i64 -> Int64.to_int i64
-    | _ -> raise @@ Invalid_argument "want int!"
-  in
-
-  let get_header_byte = function
-    | HByte b -> b
-    | _ -> raise @@ Invalid_argument "want int!"
-  in
-
-
-  let get_header_bool = function
-    | HBool b -> b
-    | _ -> raise @@ Invalid_argument "want bool!"
-  in
-
-  let get_byte_array = function
-    | HArray arr -> Array.map get_header_byte arr
-    | _ -> raise @@ Invalid_argument "want array!"
-  in
-
-  let get_bool_array = function
-    | HArray arr -> Array.map get_header_bool arr
-    | _ -> raise @@ Invalid_argument "want array!"
-  in
-
   Log.infoln "loading tiles...";
-  let max_x = get_header_int (List.assoc "max_tiles_x" header) in
-  let max_y = get_header_int (List.assoc "max_tiles_y" header) in
-  let importance_ints = Array.to_list @@ (get_byte_array (List.assoc "importance" header)) in 
-  let importance = Array.concat @@ List.map (byte_to_boolbits) importance_ints in
+  let max_x = int_of_header_data @@ List.assoc "max_tiles_x" header in
+  let max_y = int_of_header_data @@ List.assoc "max_tiles_y" header in
+  let importance = 
+    let unwrap_bools = function 
+      | Array a -> Array.map (function Bool b -> b | _ -> false) a
+      | _ -> raise @@ Invalid_argument "???"
+    in
+    unwrap_bools @@ List.assoc "importance" header
+  in 
   Printf.printf "importance = length %d\n" (Array.length importance);
   
   let tiles = Array.make_matrix max_y max_x EmptyTile in
-
-  let input_int16 = read_int16 in
 
   (* A beautiful abstraction over this cluster f*** of a format *)
   let read_tile () : tile_read =
@@ -430,15 +356,12 @@ let read_tiles in_ch header =
 
     printf "begin read tile: pos_in = %d\n" (pos_in in_ch);
 
-    let flags_to_string bools = 
+    (*let flags_to_string bools = 
       String.concat "," @@ Array.to_list @@ Array.map string_of_bool bools
-    in
+    in*)
     (* These flags indicate how much we need to read to extract all the
      * information from the series of bytes representing this tile *)
     let flags3,flags2,flags1 = read_tile_flags in_ch in
-    (*printf "\nis it flags3: %s\n" @@ flags_to_string flags3;
-    printf "is it flags2: %s\n" @@ flags_to_string flags2;
-    printf "is it flags1: %s\n" @@ flags_to_string flags1;*)
     (* First byte: b3 (everything past this is optional) *)
     let has_tile_active = flags3.(1) in
     let has_wall = flags3.(2) in
@@ -460,7 +383,7 @@ let read_tiles in_ch header =
 
     let tile_type = 
       if has_tile_active && has_int16_tile_type then 
-        Solid (input_int16 in_ch)
+        Solid (read_i16 in_ch)
       else if has_tile_active then 
         Solid (input_byte in_ch)
       else 
@@ -472,8 +395,8 @@ let read_tiles in_ch header =
     let frame = 
       match tile_type with
         | Solid tt when importance.(tt) ->
-           (let x = input_int16 in_ch in
-            let y = input_int16 in_ch in
+           (let x = read_i16 in_ch in
+            let y = read_i16 in_ch in
             Frame (x,y))
         | _ -> NoFrame
     in
@@ -521,7 +444,7 @@ let read_tiles in_ch header =
     let inactive = has_inactive in
 
     let rle_k = 
-      if has_int16_rle then input_int16 in_ch
+      if has_int16_rle then read_i16 in_ch
       else if has_int8_rle then input_byte in_ch
       else 0
     in
@@ -595,111 +518,6 @@ let read_tiles in_ch header =
   done;
   tiles 
 ;;
-
-(*let read_tiles in_ch header = 
-  Log.infoln "loading tiles...";
-  let max_x = Util.int_of_bytes (List.assoc "max_tiles_x" header) in
-  let max_y = Util.int_of_bytes (List.assoc "max_tiles_y" header) in
-  let importance = Util.bool_array_of_bits (List.assoc "importance" header) in
-
-  let read_wld_tile () =
-    let tilebuf = Buffer.create 0 in
-    let bit_on bts n = ((int_of_char (Bytes.get bts 0)) land n) = n in
-    (*let add_n_bytes n = let b = (single_read inch n) in Buffer.add_bytes tilebuf b ; b in*)
-    let add_n_bytes n = 
-      for i=0 to n do
-        Buffer.add_char tilebuf @@ input_char in_ch
-      done
-    in
-    let add_byte () = add_n_bytes 1 in
-    let add_int16 () = add_n_bytes 2 in
-    let add_int32 () = add_n_bytes 4 in
-
-    let b3 = add_byte () in
-    let b2 = if (bit_on b3 1) then add_byte () else Bytes.make 1 '\000' in
-    let b = if (bit_on b2 1) then add_byte () else Bytes.make 1 '\000' in
-
-    let tile_id = begin
-      if (bit_on b3 2) then begin (* if active tile *)
-        let num2 = (* tile id *)
-          (util.int_of_bytes (if (bit_on b3 32) then add_int16 () else add_byte ()))
-        in
-
-        if importance.(num2) then ignore(add_int32 ()) (* texture coordinates *)
-        else ();
-
-        if bit_on b 8 then ignore(add_byte ()) else (); (* tile color *)
-        num2 (* <-- type of tile *)
-      end 
-        else -1 (* no tile here *)
-    end
-    in
-
-    if bit_on b3 4 then begin
-      ignore(add_byte ()); (* wall type *)
-      if bit_on b 16 then ignore(add_byte ()) else (); (* wall color *)
-    end else ();
-
-    let b4 = ((util.byte_at b3 0) land 24) lsr 3 in
-    if b4 != 0 then ignore(add_byte ()) else ();  (* liquid type *)
-
-    let tile_id = match b4 with  (* treat liquid like a tile *)
-      | 1 -> 600      (* water *)
-      | 2 -> 700      (* lava *)
-      | 3 -> 800      (* honey *)
-      | _ -> tile_id  (* no liquid *)
-    in
-
-    let b4 = ((util.byte_at b3 0) land 192) lsr 6 in
-
-    (* rle count *)
-    let k =  
-      match b4 with
-        | 0 -> bytes.make 1 '\000'
-        | 1 -> add_byte ()
-        | _ -> add_int16 () 
-    in
-
-    ( (buffer.to_bytes tilebuf) , 
-      [ ("rle_length", (util.int_of_bytes k)) ; ("tile_id", tile_id) ] )
-  in
-
-  (*let tiles = array.make_matrix max_x max_y (bytes.create 0) in*)
-  let tiles = array.make_matrix max_y max_x '\000' in
-  for x=0 to (max_x-1) do
-    log.printf log.info "loading tile row %d/%d\n" (x+1) max_x;
-    (*printf.printf "--> new x: %d (max_x = %d, max_y = %d)\n" x max_x max_y;*)
-    let rec for_every_y y =
-      if y >= max_y then ()
-      else begin
-        let tile_data = read_wld_tile () in 
-        let tile_bytes = fst tile_data in
-        let rle_count = List.assoc "rle_length" (snd tile_data) in
-        let tile_id = List.assoc "tile_id" (snd tile_data) in
-        let tile_char = Tiles.char_of_tile @@ tiles.tile_of_id tile_id in
-
-        (* log everything here *)
-        log.printf log.debug 
-          "tid = %3d ; tchr = %c ; k = %3d ; (y=%d,x=%d) ; bytes = [%s\b]\n" 
-          tile_id tile_char rle_count y x (log.int_string_of_bytes tile_bytes);
-
-        (* set tile char at y,x *)
-        tiles.(y).(x) <- tile_char;
-
-        (* copy tile data rle times down *)
-        for y_with_rle=(y+1) to (y+rle_count) do 
-          tiles.(y_with_rle).(x) <- tile_char
-        done;
-
-        (* continue down column *)
-        for_every_y (rle_count + y + 1)
-      end 
-    in
-    for_every_y 0;
-  done;
-  log.infof " %d tiles\n" (max_y*max_x);
-  tiles ;;
-*)
 
 let read_chests in_ch = () ;;
 let read_signs in_ch = () ;;
