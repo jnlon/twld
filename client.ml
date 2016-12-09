@@ -5,7 +5,7 @@ let inch =
   with Invalid_argument msg -> (print_endline "Need argv"; exit 1)
 in
 let header = World.read_header inch in
-World.print_header header
-
-(*let tiles = World.read_tiles inch header in
-tiles*)
+let tiles = World.read_tiles inch header in
+(*World.print_header header;*)
+tiles;
+World.read_chests inch

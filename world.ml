@@ -1,8 +1,8 @@
 open Extensions.Pervasives ;; 
 
+(*************** Types ***************)
+
 exception Wld_version_unsupported of string ;;
-exception Read_type_unsupported of string ;;
-exception Unknown_array_size_type of string ;;
 let supported_wld_version = 156;;
 
 type header_data = 
@@ -64,12 +64,13 @@ type position =
 
 type item = 
  { id : int ;
-   prefix : int } ;;
+   prefix : int ;
+   stack : int } ;;
 
 type chest = 
   { pos : position ;
     name : string ;
-    items : item array } ;;
+    items : item list } ;;
 
 type sign = 
   { pos : position ;
@@ -100,6 +101,14 @@ type world =
     entities: entity array ;
     pressure_plates: pressure_plate array } ;;
 
+
+(*************** Utilities ***************)
+
+let int_of_boolbits arr =
+  let sum tosum = Array.fold_left (fun x1 x2 -> x1+x2) 0 tosum in
+  sum @@ Array.mapi (fun i x -> if x then (2 ^^ i) else 0) arr ;;
+
+
 let byte_to_boolbits (byte : int) =
   let (|.|) data bit = data land bit == bit in
   [| byte |.| 1 ;
@@ -111,18 +120,26 @@ let byte_to_boolbits (byte : int) =
      byte |.| 64 ;
      byte |.| 128 |] ;;
 
-let rec header_data_to_string = function
+let rec string_of_header_data = function
     | Bool b -> string_of_bool b
     | Byte i | Int16 i -> string_of_int i
     | Int32 i32 -> Int32.to_string i32
     | Single f | Double f -> string_of_float f
     | Int64 i64 -> Int64.to_string i64
     | String s -> s
-    | Array a -> String.concat "," @@ List.map (header_data_to_string) (Array.to_list a)
+    | Array a -> String.concat "," @@ List.map (string_of_header_data) (Array.to_list a)
     | Unknown -> "?????"
 
+let string_of_header itm = 
+  Printf.sprintf "%s: %s" (fst itm) (string_of_header_data (snd itm)) ;;
+
 let print_header h = 
-  List.iter (fun s -> Printf.printf "%s: %s\n" (fst s) (header_data_to_string (snd s))) h
+  List.iter (fun s -> print_endline @@ string_of_header s) h
+
+
+(*************** World IO ***************)
+
+(****** World Header ******)
 
 let read_header inch = 
   let read = function
@@ -137,8 +154,10 @@ let read_header inch =
     | `ArrayString n -> Array (Array.init n (fun i -> String (read_pascal_string inch)))
     | `ArrayInt32 n -> Array (Array.init n (fun i -> Int32 (read_i32 inch)))
     | `ArrayBitBool n -> begin (* where n is # of bytes, not bits *)
-        let read_boolbits () = byte_to_boolbits (input_byte inch) in
-        Array (Array.init n (fun i -> Array (Array.map (fun b -> Bool b) (read_boolbits ()))))
+        let read_boolbits _ = byte_to_boolbits (input_byte inch) in
+        let to_bool = function b -> Bool b | _ -> Bool false in
+        Array (Array.map to_bool @@ Array.concat @@ Array.to_list @@ Array.init n read_boolbits)
+
       end
     | _ -> raise @@ Invalid_argument "Unknown type passed to read"
   in
@@ -263,21 +282,19 @@ let read_header inch =
   a.(115) <- ("temp_party_cooldown", read `Int32);
   a.(116) <- ("_num_celebrating", read `Int32);
   a.(117) <- ("temp_party_celebrating_npcs", read (`ArrayInt32 (int_of_header_data @@ snd a.(116))));
-  (* v 173*)
+  (* v 173 *)
   a.(118) <- ("temp_sandstorm_happening", read `Bool);
   a.(119) <- ("temp_sandstorm_time_left", read `Int32);
   a.(120) <- ("temp_sandstorm_severity", read `Single);
   a.(121) <- ("temp_sandstorm_intended_severity", read `Single);
 
-  (* Return an assoc list from array a
+  (* Return an assoc list from array
    * This provides convenient header access through List.assoc *)
   Array.to_list a
 ;;
 
 
-let int_of_boolbits arr =
-  let sum tosum = Array.fold_left (fun x1 x2 -> x1+x2) 0 tosum in
-  sum @@ Array.mapi (fun i x -> if x then (2 ^^ i) else 0) arr ;;
+(****** World Tiles ******)
 
 let read_tile_flags in_ch = 
   let flags3 = byte_to_boolbits @@ input_byte in_ch in
@@ -304,10 +321,15 @@ let color_to_string = function
   | NoColor -> "NoColor"
   | Color n -> Printf.sprintf "Color (%d)" n ;;
 
+
 let tile_t_to_string = function
   | NoType -> "NoType"
   | Solid n ->  Printf.sprintf "Solid (%d)" n
   | Liquid l ->  Printf.sprintf "Liquid (%d)" l ;;
+
+let tile_tt_to_string = function
+  | Tile t -> tile_t_to_string t.front.t
+  | _ -> "[NoTile]"
 
 let frame_to_string = function
   | NoFrame -> "NoFrame"
@@ -342,19 +364,17 @@ let read_tiles in_ch header =
   let importance = 
     let unwrap_bools = function 
       | Array a -> Array.map (function Bool b -> b | _ -> false) a
-      | _ -> raise @@ Invalid_argument "???"
+      | _ -> raise @@ Invalid_argument "Cannot unwrap bools of importance!"
     in
     unwrap_bools @@ List.assoc "importance" header
   in 
-  Printf.printf "importance = length %d\n" (Array.length importance);
-  
+
   let tiles = Array.make_matrix max_y max_x EmptyTile in
 
   (* A beautiful abstraction over this cluster f*** of a format *)
   let read_tile () : tile_read =
-    let open Printf in
 
-    printf "begin read tile: pos_in = %d\n" (pos_in in_ch);
+    Log.debugf "begin read tile: pos_in = %d\n" (pos_in in_ch);
 
     (*let flags_to_string bools = 
       String.concat "," @@ Array.to_list @@ Array.map string_of_bool bools
@@ -389,8 +409,6 @@ let read_tiles in_ch header =
       else 
         NoType
     in
-
-    Printf.printf "%s\n" (tile_t_to_string tile_type);
 
     let frame = 
       match tile_type with
@@ -460,8 +478,8 @@ let read_tiles in_ch header =
     (* Finally, put the tile together *)
     if is_empty_tile 
     then 
-      { t = EmptyTile 
-      ; k = rle_k }
+      { t = EmptyTile ;
+        k = rle_k }
     else begin
       let foreground = 
         { t = tile_type ;
@@ -494,13 +512,8 @@ let read_tiles in_ch header =
         let rle_count = tile_raw.k in
         let tile = tile_raw.t in
 
-        Printf.printf "tile_to_string: %s\n" (tile_to_string tile);
-
-        (*let rle_count = 0 in
-        let tile = EmptyTile in*)
-
         (* log everything here *)
-        Printf.printf "y = %d, x = %d, k = %d\n" y x rle_count;
+        Printf.printf "y = %d, x = %d, k = %d, tile = %s\n" y x rle_count (tile_tt_to_string tile);
 
         (* set tile at y,x *)
         tiles.(y).(x) <- tile;
@@ -519,7 +532,42 @@ let read_tiles in_ch header =
   tiles 
 ;;
 
-let read_chests in_ch = () ;;
+let read_chests in_ch = 
+  let num_chests = read_i16 in_ch in
+  let chest_capacity = read_i16 in_ch in
+  let items_to_skip = max (chest_capacity - 40) 0 in (* item overflow *)
+  let chest_capacity = min chest_capacity 40 in (* Cap to 40 items *)
+
+  let rec read_chest_items n = 
+    if n == 0 then []
+    else begin
+      let stack = read_i16 in_ch in
+      let id = Int32.to_int @@ read_i32 in_ch in
+      let prefix = input_byte in_ch in
+      {id=id;stack=stack;prefix=prefix} :: (read_chest_items (n-1))
+    end
+  in
+
+  let read_chest i = 
+    let x = Int32.to_int @@ read_i32 in_ch in
+    let y = Int32.to_int @@ read_i32 in_ch in
+    let name = read_pascal_string in_ch in
+    { pos = { x = x; y = y } ;
+      name = name ; 
+      items = read_chest_items chest_capacity }
+  in
+
+  let chests = Array.init num_chests (fun i -> read_chest in_ch) in
+
+  for i=0 to items_to_skip do
+    ignore @@ read_i32 in_ch;
+    ignore @@ input_byte in_ch;
+  done;
+
+  chests
+
+;;
+
 let read_signs in_ch = () ;;
 let read_npcs in_ch = () ;;
 let read_entities in_ch = () ;;
