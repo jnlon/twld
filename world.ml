@@ -62,13 +62,10 @@ type position =
   { x : int ;
     y : int } ;;
 
-
-type item_data = 
+type item = 
  { id : int32 ;
    prefix : int ;
    stack : int } ;;
-
-type item = NoItem | Item of item_data ;;
 
 type chest = 
   { pos : position ;
@@ -542,16 +539,19 @@ let read_chests in_ch =
 
   Printf.printf "num_chests = %d, cap=%d (@ %d)\n" num_chests chest_capacity (pos_in in_ch);
 
-  let read_item in_ch = 
-    match (read_i16 in_ch) with
-    | 0 -> NoItem
-    | stack -> 
-      begin
+  let rec read_items n = 
+    if n = 0 then []
+    else begin
+      let stack = (read_i16 in_ch) in
+      if stack = 0 then
+        read_items (n-1)
+      else begin
         let id = read_i32 in_ch in
         let prefix = input_byte in_ch in
         Printf.printf "Item: stack=%d,id=%ld,prefix=%d\n" stack id prefix;
-        Item {id=id;stack=stack;prefix=prefix}
+        {id=id;stack=stack;prefix=prefix} :: read_items (n-1)
       end
+    end
   in
 
   (*for i=0 to (items_to_skip) do
@@ -569,7 +569,7 @@ let read_chests in_ch =
     let item = 
       { pos = { x = x; y = y } ;
         name = name ; 
-        items = Array.to_list @@ Array.init chest_capacity (fun i -> read_item in_ch) }
+        items = read_items chest_capacity }
     in
     item
   in
@@ -578,7 +578,13 @@ let read_chests in_ch =
   Array.init num_chests (fun i -> read_chest in_ch)
 ;;
 
-let read_signs in_ch = () ;;
+let read_signs in_ch = 
+  let num_signs = read_i16 in_ch in ()
+
+  (*Array.init num_signs (fun i -> read_sign)*)
+
+;;
+
 let read_npcs in_ch = () ;;
 let read_entities in_ch = () ;;
 let read_pressure_plates in_ch = () ;;
