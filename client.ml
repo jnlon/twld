@@ -10,3 +10,6 @@ let tiles = World.read_tiles inch header in
 tiles;
 let chests = World.read_chests inch in
 chests;
+
+let signs = World.read_signs inch in
+signs;

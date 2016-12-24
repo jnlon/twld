@@ -59,8 +59,8 @@ type tile =
 type tiles = tile array array ;;
 
 type position = 
-  { x : int ;
-    y : int } ;;
+  { x : int32 ;
+    y : int32 } ;;
 
 type item = 
  { id : int32 ;
@@ -562,10 +562,10 @@ let read_chests in_ch =
   done;*)
 
   let read_chest i = 
-    let x = Int32.to_int @@ read_i32 in_ch in
-    let y = Int32.to_int @@ read_i32 in_ch in
+    let x = read_i32 in_ch in
+    let y = read_i32 in_ch in
     let name = read_pascal_string in_ch in
-    Printf.printf "Chest: x=%d,y=%d,name='%s'\n" x y name;
+    Printf.printf "Chest: x=%ld,y=%ld,name='%s'\n" x y name;
     let item = 
       { pos = { x = x; y = y } ;
         name = name ; 
@@ -579,10 +579,19 @@ let read_chests in_ch =
 ;;
 
 let read_signs in_ch = 
-  let num_signs = read_i16 in_ch in ()
+  let num_signs = read_i16 in_ch in
 
-  (*Array.init num_signs (fun i -> read_sign)*)
+  Printf.printf "Sign count: %d\n" num_signs;
 
+  let read_sign in_ch = 
+    let sign_text = read_pascal_string in_ch in
+    let x = read_i32 in_ch in
+    let y = read_i32 in_ch in
+    Printf.printf "Sign @ (%ld,%ld): '%s'\n" x y sign_text;
+    {pos = {x = x; y = y} ; text = sign_text}
+  in
+
+  Array.to_list @@ Array.init num_signs (fun i -> read_sign in_ch)
 ;;
 
 let read_npcs in_ch = () ;;
