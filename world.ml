@@ -62,10 +62,13 @@ type position =
   { x : int ;
     y : int } ;;
 
-type item = 
- { id : int ;
+
+type item_data = 
+ { id : int32 ;
    prefix : int ;
    stack : int } ;;
+
+type item = NoItem | Item of item_data ;;
 
 type chest = 
   { pos : position ;
@@ -155,7 +158,7 @@ let read_header inch =
     | `ArrayInt32 n -> Array (Array.init n (fun i -> Int32 (read_i32 inch)))
     | `ArrayBitBool n -> begin (* where n is # of bytes, not bits *)
         let read_boolbits _ = byte_to_boolbits (input_byte inch) in
-        let to_bool = function b -> Bool b | _ -> Bool false in
+        let to_bool = function b -> Bool b in
         Array (Array.map to_bool @@ Array.concat @@ Array.to_list @@ Array.init n read_boolbits)
 
       end
@@ -412,11 +415,11 @@ let read_tiles in_ch header =
 
     let frame = 
       match tile_type with
-        | Solid tt when importance.(tt) ->
-           (let x = read_i16 in_ch in
-            let y = read_i16 in_ch in
-            Frame (x,y))
-        | _ -> NoFrame
+      | Solid tt when importance.(tt) ->
+         (let x = read_i16 in_ch in
+          let y = read_i16 in_ch in
+          Frame (x,y))
+      | _ -> NoFrame
     in
 
     let tile_color = 
@@ -537,18 +540,26 @@ let read_chests in_ch =
   let items_to_skip = max (chest_capacity - 40) 0 in (* item overflow *)
   let chest_capacity = min chest_capacity 40 in (* Cap to 40 items *)
 
-  Printf.printf "num_chests = %d, skip=%d, cap=%d (@ %d)\n" num_chests items_to_skip chest_capacity (pos_in in_ch);
+  Printf.printf "num_chests = %d, cap=%d (@ %d)\n" num_chests chest_capacity (pos_in in_ch);
 
-  let rec read_chest_items n = 
-    if n == 0 then []
-    else begin
-      let stack = read_i16 in_ch in
-      let id = Int32.to_int @@ read_i32 in_ch in
-      let prefix = input_byte in_ch in
-      Printf.printf "Item: stack=%d,id=%d,prefix=%d\n" stack id prefix;
-      {id=id;stack=stack;prefix=prefix} :: (read_chest_items (n-1))
-    end
+  let read_item in_ch = 
+    match (read_i16 in_ch) with
+    | 0 -> NoItem
+    | stack -> 
+      begin
+        let id = read_i32 in_ch in
+        let prefix = input_byte in_ch in
+        Printf.printf "Item: stack=%d,id=%ld,prefix=%d\n" stack id prefix;
+        Item {id=id;stack=stack;prefix=prefix}
+      end
   in
+
+  (*for i=0 to (items_to_skip) do
+    if ((read_i16 in_ch) > 0) then
+      (ignore @@ read_i32 in_ch;
+      ignore @@ input_byte in_ch)
+    else ()
+  done;*)
 
   let read_chest i = 
     let x = Int32.to_int @@ read_i32 in_ch in
@@ -558,20 +569,13 @@ let read_chests in_ch =
     let item = 
       { pos = { x = x; y = y } ;
         name = name ; 
-        items = read_chest_items chest_capacity }
+        items = Array.to_list @@ Array.init chest_capacity (fun i -> read_item in_ch) }
     in
-    for i=0 to items_to_skip do
-      if ((read_i16 in_ch) > 0) then
-        (ignore @@ read_i32 in_ch;
-        ignore @@ input_byte in_ch)
-      else ()
-    done;
     item
   in
 
-  let chests = Array.init num_chests (fun i -> read_chest in_ch) in
-
-  chests
+  (* Create array of chests *)
+  Array.init num_chests (fun i -> read_chest in_ch)
 ;;
 
 let read_signs in_ch = () ;;
