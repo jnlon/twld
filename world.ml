@@ -62,6 +62,10 @@ type position =
   { x : int32 ;
     y : int32 } ;;
 
+type position_float = 
+  { x : float ;
+    y : float } ;;
+
 type item = 
  { id : int32 ;
    prefix : int ;
@@ -81,14 +85,12 @@ type entity =
     id: int; } ;;
 
 type npc = 
-  { active : bool ;
-    name : string ;
-    displayName : string ;
-    positionX : string ;
-    positionY : string ;
+  { generic_name : string ;
+    display_name : string ;
+    active : bool ;
     homeless : bool ;
-    homeTileX : int ;
-    homeTileY : int } ;;
+    npc_pos : position_float ;
+    home_tile_pos : position } ;;
 
 type pressure_plate = { pos: position } ;;
 
@@ -100,7 +102,6 @@ type world =
     npcs : npc array ;
     entities: entity array ;
     pressure_plates: pressure_plate array } ;;
-
 
 (*************** Utilities ***************)
 
@@ -136,7 +137,6 @@ let string_of_header itm =
 let print_header h = 
   List.iter (fun s -> print_endline @@ string_of_header s) h
 
-
 (*************** World IO ***************)
 
 (****** World Header ******)
@@ -151,6 +151,7 @@ let read_header inch =
     | `Double -> Double (read_double inch)
     | `Int64 -> Int64 (read_i64 inch)
     | `String -> String (read_pascal_string inch)
+    | `ArrayByte n -> Array (Array.init n (fun i -> Byte (input_byte inch)))
     | `ArrayString n -> Array (Array.init n (fun i -> String (read_pascal_string inch)))
     | `ArrayInt32 n -> Array (Array.init n (fun i -> Int32 (read_i32 inch)))
     | `ArrayBitBool n -> begin (* where n is # of bytes, not bits *)
@@ -162,7 +163,7 @@ let read_header inch =
     | _ -> raise @@ Invalid_argument "Unknown type passed to read"
   in
 
-  let a = Array.make 122 ("",(Unknown)) in
+  let a = Array.make 130 ("",(Unknown)) in
   a.(0) <- ("version", read `Int32); 
   a.(1) <- ("relogic", read `Int64);
   a.(2) <- ("revision", read `Int32);
@@ -172,121 +173,133 @@ let read_header inch =
   a.(6) <- ("_num_importance", read `Int16);
   a.(7) <- ("importance", read (`ArrayBitBool 58));
   a.(8) <- ("world_name", read `String);
-  a.(9) <- ("world_id", read `Int32);
-  a.(10) <- ("left_world_boundary", read `Int32);
-  a.(11) <- ("right_world_boundary", read `Int32);
-  a.(12) <- ("top_world_boundary", read `Int32);
-  a.(13) <- ("bottom_world_boundary", read `Int32);
-  a.(14) <- ("max_tiles_y", read `Int32);
-  a.(15) <- ("max_tiles_x", read `Int32);
-  a.(16) <- ("expert_mode", read `Bool);
-  a.(17) <- ("creation_time", read `Double);
-  a.(18) <- ("moon_type", read `Byte);
-  a.(19) <- ("tree_x", read (`ArrayInt32 3)); (* size = 3 *)
-  a.(20) <- ("tree_style", read (`ArrayInt32 4)); (* size = 4 *)
-  a.(21) <- ("cave_back_x", read (`ArrayInt32 3)); (* size = 3 *)
-  a.(22) <- ("cave_back_style", read (`ArrayInt32 4)); (* size = 4 *)
-  a.(23) <- ("ice_back_style", read `Int32);
-  a.(24) <- ("jungle_back_style", read `Int32);
-  a.(25) <- ("hell_back_style", read `Int32);
-  a.(26) <- ("spawn_tile_x", read `Int32);
-  a.(27) <- ("spawn_tile_y", read `Int32);
-  a.(28) <- ("world_surface", read `Double);
-  a.(29) <- ("rock_layer", read `Double);
-  a.(30) <- ("temp_time", read `Double);
-  a.(31) <- ("temp_day_time", read `Bool);
-  a.(32) <- ("temp_moon_phase", read `Int32);
-  a.(33) <- ("temp_blood_moon", read `Bool);
-  a.(34) <- ("temp_eclipse", read `Bool);
-  a.(35) <- ("dungeon_x", read `Int32);
-  a.(36) <- ("dungeon_y", read `Int32);
-  a.(37) <- ("crimson", read `Bool);
-  a.(38) <- ("downed_boss_1", read `Bool);
-  a.(39) <- ("downed_boss_2", read `Bool);
-  a.(40) <- ("downed_boss_3", read `Bool);
-  a.(41) <- ("downed_queen_bee", read `Bool);
-  a.(42) <- ("downed_mech_boss_1", read `Bool);
-  a.(43) <- ("downed_mech_boss_2", read `Bool);
-  a.(44) <- ("downed_mech_boss_3", read `Bool);
-  a.(45) <- ("downed_mech_boss_any", read `Bool);
-  a.(46) <- ("downed_plant_boss", read `Bool);
-  a.(47) <- ("downed_golem_boss", read `Bool);
-  a.(48) <- ("downed_slime_king", read `Bool);
-  a.(49) <- ("saved_goblin", read `Bool);
-  a.(50) <- ("saved_wizard", read `Bool);
-  a.(51) <- ("saved_mech", read `Bool);
-  a.(52) <- ("downed_goblins", read `Bool);
-  a.(53) <- ("downed_clown", read `Bool);
-  a.(54) <- ("downed_frost", read `Bool);
-  a.(55) <- ("downed_pirates", read `Bool);
-  a.(56) <- ("shadow_orb_smashed", read `Bool);
-  a.(57) <- ("spawn_meteor", read `Bool);
-  a.(58) <- ("shadow_orb_count", read `Byte);
-  a.(59) <- ("altar_count", read `Int32);
-  a.(60) <- ("hard_mode", read `Bool);
-  a.(61) <- ("invasion_delay", read `Int32);
-  a.(62) <- ("invasion_size", read `Int32);
-  a.(63) <- ("invasion_type", read `Int32);
-  a.(64) <- ("invasion_x", read `Double);
-  a.(65) <- ("slime_rain_time", read `Double);
-  a.(66) <- ("sundial_cooldown", read `Byte);
-  a.(67) <- ("temp_raining", read `Bool);
-  a.(68) <- ("temp_rain_time", read `Int32);
-  a.(69) <- ("temp_max_rain", read `Single);
-  a.(70) <- ("ore_tier1", read `Int32);
-  a.(71) <- ("ore_tier2", read `Int32);
-  a.(72) <- ("ore_tier3", read `Int32);
-  a.(73) <- ("tree_bg", read `Byte);
-  a.(74) <- ("corrupt_bg", read `Byte);
-  a.(75) <- ("jungle_bg", read `Byte);
-  a.(76) <- ("snow_bg", read `Byte);
-  a.(77) <- ("hallow_bg", read `Byte);
-  a.(78) <- ("crimson_bg", read `Byte);
-  a.(79) <- ("desert_bg", read `Byte);
-  a.(80) <- ("ocean_bg", read `Byte);
-  a.(81) <- ("cloud_bg_active", read `Int32);
-  a.(82) <- ("num_clouds", read `Int16);
-  a.(83) <- ("wind_speed", read `Single);
-  a.(84) <- ("_num_angler_finished", read `Int32);
-  a.(85) <- ("angler_who_finished_today", read (`ArrayString (int_of_header_data (snd a.(84)))));
-  a.(86) <- ("saved_angler", read `Bool);
-  a.(87) <- ("angler_quest", read `Int32);
-  a.(88) <- ("saved_stylist", read `Bool);
-  a.(89) <- ("saved_tax_collector", read `Bool);
-  a.(90) <- ("invasion_size_start", read `Int32);
-  a.(91) <- ("temp_cultist_delay", read `Int32);
-  a.(92) <- ("_num_npc_killed", read `Int16);
-  a.(93) <- ("npc_kill_count", read (`ArrayInt32 (int_of_header_data (snd a.(92)))));
-  a.(94) <- ("fast_forward_time", read `Bool);
-  a.(95) <- ("downed_fishron", read `Bool);
-  a.(96) <- ("downed_martians", read `Bool);
-  a.(97) <- ("downed_ancient_cultist", read `Bool);
-  a.(98) <- ("downed_moonlord", read `Bool);
-  a.(99) <- ("downed_halloween_king", read `Bool);
-  a.(100) <- ("downed_halloween_tree", read `Bool);
-  a.(101) <- ("downed_christmas_ice_queen", read `Bool);
-  a.(102) <- ("downed_christmas_santank", read `Bool);
-  a.(103) <- ("downed_christmas_tree", read `Bool);
-  a.(104) <- ("downed_tower_solar", read `Bool);
-  a.(105) <- ("downed_tower_vortex", read `Bool);
-  a.(106) <- ("downed_tower_nebula", read `Bool);
-  a.(107) <- ("downed_tower_stardust", read `Bool);
-  a.(108) <- ("tower_active_solar", read `Bool);
-  a.(109) <- ("tower_active_vortex", read `Bool);
-  a.(110) <- ("tower_active_nebula", read `Bool);
-  a.(111) <- ("tower_active_stardust", read `Bool);
-  a.(112) <- ("lunar_apocalypse_is_up", read `Bool);
-  (* v 170 *)
-  a.(113) <- ("temp_party_manual", read `Bool);
-  a.(114) <- ("temp_party_genuine", read `Bool);
-  a.(115) <- ("temp_party_cooldown", read `Int32);
-  a.(116) <- ("_num_celebrating", read `Int32);
-  a.(117) <- ("temp_party_celebrating_npcs", read (`ArrayInt32 (int_of_header_data @@ snd a.(116))));
-  (* v 173 *)
-  a.(118) <- ("temp_sandstorm_happening", read `Bool);
-  a.(119) <- ("temp_sandstorm_time_left", read `Int32);
-  a.(120) <- ("temp_sandstorm_severity", read `Single);
-  a.(121) <- ("temp_sandstorm_intended_severity", read `Single);
+
+  (* v179 *)
+  a.(9) <- ("seed", read `String); 
+  a.(10) <- ("world_generator_version", read `Int64);
+  a.(11) <- ("unique_id", read (`ArrayByte 16));
+
+  a.(12) <- ("world_id", read `Int32);
+  a.(13) <- ("left_world_boundary", read `Int32);
+  a.(14) <- ("right_world_boundary", read `Int32);
+  a.(16) <- ("top_world_boundary", read `Int32);
+  a.(17) <- ("bottom_world_boundary", read `Int32);
+  a.(18) <- ("max_tiles_y", read `Int32);
+  a.(19) <- ("max_tiles_x", read `Int32);
+  a.(20) <- ("expert_mode", read `Bool);
+  a.(21) <- ("creation_time", read `Double);
+  a.(22) <- ("moon_type", read `Byte);
+  a.(23) <- ("tree_x", read (`ArrayInt32 3));
+  a.(24) <- ("tree_style", read (`ArrayInt32 4)); 
+  a.(25) <- ("cave_back_x", read (`ArrayInt32 3)); 
+  a.(26) <- ("cave_back_style", read (`ArrayInt32 4)); 
+  a.(27) <- ("ice_back_style", read `Int32);
+  a.(28) <- ("jungle_back_style", read `Int32);
+  a.(29) <- ("hell_back_style", read `Int32);
+  a.(30) <- ("spawn_tile_x", read `Int32);
+  a.(31) <- ("spawn_tile_y", read `Int32);
+  a.(32) <- ("world_surface", read `Double);
+  a.(33) <- ("rock_layer", read `Double);
+  a.(34) <- ("temp_time", read `Double);
+  a.(35) <- ("temp_day_time", read `Bool);
+  a.(36) <- ("temp_moon_phase", read `Int32);
+  a.(37) <- ("temp_blood_moon", read `Bool);
+  a.(38) <- ("temp_eclipse", read `Bool);
+  a.(39) <- ("dungeon_x", read `Int32);
+  a.(40) <- ("dungeon_y", read `Int32);
+  a.(41) <- ("crimson", read `Bool);
+  a.(42) <- ("downed_boss_1", read `Bool);
+  a.(43) <- ("downed_boss_2", read `Bool);
+  a.(44) <- ("downed_boss_3", read `Bool);
+  a.(45) <- ("downed_queen_bee", read `Bool);
+  a.(46) <- ("downed_mech_boss_1", read `Bool);
+  a.(47) <- ("downed_mech_boss_2", read `Bool);
+  a.(48) <- ("downed_mech_boss_3", read `Bool);
+  a.(49) <- ("downed_mech_boss_any", read `Bool);
+  a.(50) <- ("downed_plant_boss", read `Bool);
+  a.(51) <- ("downed_golem_boss", read `Bool);
+  a.(52) <- ("downed_slime_king", read `Bool);
+  a.(53) <- ("saved_goblin", read `Bool);
+  a.(54) <- ("saved_wizard", read `Bool);
+  a.(55) <- ("saved_mech", read `Bool);
+  a.(56) <- ("downed_goblins", read `Bool);
+  a.(57) <- ("downed_clown", read `Bool);
+  a.(58) <- ("downed_frost", read `Bool);
+  a.(59) <- ("downed_pirates", read `Bool);
+  a.(60) <- ("shadow_orb_smashed", read `Bool);
+  a.(61) <- ("spawn_meteor", read `Bool);
+  a.(62) <- ("shadow_orb_count", read `Byte);
+  a.(63) <- ("altar_count", read `Int32);
+  a.(64) <- ("hard_mode", read `Bool);
+  a.(65) <- ("invasion_delay", read `Int32);
+  a.(66) <- ("invasion_size", read `Int32);
+  a.(67) <- ("invasion_type", read `Int32);
+  a.(68) <- ("invasion_x", read `Double);
+  a.(69) <- ("slime_rain_time", read `Double);
+  a.(70) <- ("sundial_cooldown", read `Byte);
+  a.(71) <- ("temp_raining", read `Bool);
+  a.(72) <- ("temp_rain_time", read `Int32);
+  a.(73) <- ("temp_max_rain", read `Single);
+  a.(74) <- ("ore_tier1", read `Int32);
+  a.(75) <- ("ore_tier2", read `Int32);
+  a.(76) <- ("ore_tier3", read `Int32);
+  a.(77) <- ("tree_bg", read `Byte);
+  a.(78) <- ("corrupt_bg", read `Byte);
+  a.(79) <- ("jungle_bg", read `Byte);
+  a.(80) <- ("snow_bg", read `Byte);
+  a.(81) <- ("hallow_bg", read `Byte);
+  a.(82) <- ("crimson_bg", read `Byte);
+  a.(83) <- ("desert_bg", read `Byte);
+  a.(84) <- ("ocean_bg", read `Byte);
+  a.(85) <- ("cloud_bg_active", read `Int32);
+  a.(86) <- ("num_clouds", read `Int16);
+  a.(87) <- ("wind_speed", read `Single);
+  a.(88) <- ("_num_angler_finished", read `Int32);
+  a.(89) <- ("angler_who_finished_today", read (`ArrayString (int_of_header_data (snd a.(88)))));
+  a.(90) <- ("saved_angler", read `Bool);
+  a.(91) <- ("angler_quest", read `Int32);
+  a.(92) <- ("saved_stylist", read `Bool);
+  a.(93) <- ("saved_tax_collector", read `Bool);
+  a.(94) <- ("invasion_size_start", read `Int32);
+  a.(95) <- ("temp_cultist_delay", read `Int32);
+  a.(96) <- ("_num_npc_killed", read `Int16);
+  a.(97) <- ("npc_kill_count", read (`ArrayInt32 (int_of_header_data (snd a.(96)))));
+  a.(98) <- ("fast_forward_time", read `Bool);
+  a.(99) <- ("downed_fishron", read `Bool);
+  a.(100) <- ("downed_martians", read `Bool);
+  a.(101) <- ("downed_ancient_cultist", read `Bool);
+  a.(102) <- ("downed_moonlord", read `Bool);
+  a.(103) <- ("downed_halloween_king", read `Bool);
+  a.(104) <- ("downed_halloween_tree", read `Bool);
+  a.(105) <- ("downed_christmas_ice_queen", read `Bool);
+  a.(106) <- ("downed_christmas_santank", read `Bool);
+  a.(107) <- ("downed_christmas_tree", read `Bool);
+  a.(108) <- ("downed_tower_solar", read `Bool);
+  a.(109) <- ("downed_tower_vortex", read `Bool);
+  a.(110) <- ("downed_tower_nebula", read `Bool);
+  a.(111) <- ("downed_tower_stardust", read `Bool);
+  a.(112) <- ("tower_active_solar", read `Bool);
+  a.(113) <- ("tower_active_vortex", read `Bool);
+  a.(114) <- ("tower_active_nebula", read `Bool);
+  a.(115) <- ("tower_active_stardust", read `Bool);
+  a.(116) <- ("lunar_apocalypse_is_up", read `Bool);
+  (* v 169 *)
+  a.(117) <- ("temp_party_manual", read `Bool);
+  a.(118) <- ("temp_party_genuine", read `Bool);
+  a.(119) <- ("temp_party_cooldown", read `Int32);
+  a.(120) <- ("_num_celebrating", read `Int32);
+  a.(121) <- ("temp_party_celebrating_npcs", read (`ArrayInt32 (int_of_header_data @@ snd a.(120))));
+  (* v 172 *)
+  a.(122) <- ("temp_sandstorm_happening", read `Bool);
+  a.(123) <- ("temp_sandstorm_time_left", read `Int32);
+  a.(124) <- ("temp_sandstorm_severity", read `Single);
+  a.(125) <- ("temp_sandstorm_intended_severity", read `Single);
+
+  (* v 179 *)
+  a.(126) <- ("saved_bartender", read `Bool);
+  a.(127) <- ("downed_invasion_t1", read `Bool);
+  a.(128) <- ("downed_invasion_t2", read `Bool);
+  a.(129) <- ("downed_invasion_t3", read `Bool);
 
   (* Return an assoc list from array
    * This provides convenient header access through List.assoc *)
@@ -594,7 +607,15 @@ let read_signs in_ch =
   Array.to_list @@ Array.init num_signs (fun i -> read_sign in_ch)
 ;;
 
-let read_npcs in_ch = () ;;
+(*let read_npcs in_ch = 
+  let read_npcs in_ch =
+    if (read_bool in_ch) then begin
+
+    end
+    else []
+;;*)
+
+
 let read_entities in_ch = () ;;
 let read_pressure_plates in_ch = () ;;
 
