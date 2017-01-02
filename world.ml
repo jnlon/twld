@@ -84,13 +84,20 @@ type entity =
   { pos: position ;
     id: int; } ;;
 
-type npc = 
+type npc_data =
   { generic_name : string ;
     display_name : string ;
-    active : bool ;
-    homeless : bool ;
     npc_pos : position_float ;
-    home_tile_pos : position } ;;
+    homeless : bool ;
+    home_pos : position } ;;
+
+type partial_npc_data = 
+  { generic_name : string ;
+    npc_pos : position_float } ;;
+
+type npc = 
+    NPC of npc_data 
+  | PartialNPC of partial_npc_data ;;
 
 type pressure_plate = { pos: position } ;;
 
@@ -369,6 +376,16 @@ let tile_to_string = function
       )
   end ;;
 
+let read_position in_ch : position = 
+  let x = read_i32 in_ch in
+  let y = read_i32 in_ch in
+  { x = x ; y = y } ;;
+
+let read_position_float in_ch : position_float = 
+  let x = read_single in_ch in
+  let y = read_single in_ch in
+  { x = x ; y = y } ;;
+
 let read_tiles in_ch header = 
 
   Log.infoln "loading tiles...";
@@ -607,14 +624,43 @@ let read_signs in_ch =
   Array.to_list @@ Array.init num_signs (fun i -> read_sign in_ch)
 ;;
 
-(*let read_npcs in_ch = 
-  let read_npcs in_ch =
+let read_npcs in_ch = 
+  let rec read_npcs () =
     if (read_bool in_ch) then begin
-
-    end
+      let generic_name = read_pascal_string in_ch in
+      let display_name = read_pascal_string in_ch in
+      let npc_pos = read_position_float in_ch in
+      let homeless = read_bool in_ch in
+      let home_pos = read_position in_ch in
+      let data = 
+        { npc_pos = npc_pos ;
+          home_pos = home_pos ;
+          generic_name = generic_name ;
+          display_name = display_name ;
+          homeless = homeless }
+      in
+      (NPC data) :: (read_npcs ())
+    end 
     else []
-;;*)
+  in
+  let rec read_partial_npcs () = 
+    if (read_bool in_ch) then begin
+      let generic_name = read_pascal_string in_ch in
+      let npc_pos = read_position_float in_ch in
+      let data = 
+        { npc_pos = npc_pos ;
+          generic_name = generic_name }
+      in
+      (PartialNPC data) :: (read_partial_npcs ())
+    end 
+    else []
+  in
 
+  let npcs = read_npcs () in
+  let partial_npcs = read_partial_npcs () in
+
+  List.append npcs partial_npcs
+;;
 
 let read_entities in_ch = () ;;
 let read_pressure_plates in_ch = () ;;
