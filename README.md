@@ -1,3 +1,5 @@
+**Note:** Currently a WIP and incompatible with current world versions
+
 ### twld
 
 `twld` is an ocaml library for querying and editing a terraria world file. 
